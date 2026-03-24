@@ -6,6 +6,7 @@ Handles web routes and orchestrates the full analysis pipeline.
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for
 import time
 import traceback
+import json
 import csv
 import os
 
@@ -84,7 +85,11 @@ def _run_pipeline(ticker):
     # Step 1 — Fetch financial data
     financials = fetch_financials(ticker)
     if financials is None:
-        raise ValueError(f"Could not fetch financial data for '{ticker}'. Check if the ticker is valid (e.g., TCS.NS, RELIANCE.NS).")
+        raise ValueError(
+            f"Could not fetch financial data for '{ticker}'. "
+            f"Possible reasons: invalid ticker, company delisted/suspended, "
+            f"insufficient historical data, or data source temporarily unavailable."
+        )
 
     company_info = get_company_info(ticker)
 
@@ -140,6 +145,23 @@ def _run_pipeline(ticker):
     except Exception:
         ai_report = None
 
+    # Pre-serialize chart data to avoid Jinja2 Undefined→tojson crashes
+    chart_data = {
+        "years": financials.get("years", []) if financials else [],
+        "revenue": financials.get("revenue", []) if financials else [],
+        "cashflow": financials.get("operating_cash_flow", []) if financials else [],
+        "debt": financials.get("total_debt", []) if financials else [],
+        "mscoreYears": [item.get("year") for item in (beneish_trend or [])],
+        "mscoreVals": [item.get("m_score") for item in (beneish_trend or [])],
+        "sentYears": [],
+        "sentScores": [],
+        "peerMetrics": peer_comparison.get("company_metrics", {}) if peer_comparison else {},
+        "peerAvgs": peer_comparison.get("peer_averages", {}) if peer_comparison else {},
+    }
+    if auditor_sentiment and auditor_sentiment.get("years"):
+        chart_data["sentYears"] = [y.get("year") for y in auditor_sentiment["years"]]
+        chart_data["sentScores"] = [y.get("sentiment_score", 0) for y in auditor_sentiment["years"]]
+
     return {
         "ticker": ticker,
         "company_info": company_info,
@@ -152,6 +174,7 @@ def _run_pipeline(ticker):
         "score": score,
         "peer_comparison": peer_comparison,
         "ai_report": ai_report,
+        "chart_data_json": json.dumps(chart_data),
     }
 
 

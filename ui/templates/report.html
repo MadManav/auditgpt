@@ -1,405 +1,960 @@
 <!DOCTYPE html>
-<html lang="en">
+<html class="h-full" lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>AuditGPT — Report for {{ ticker }}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              "primary": "#041627",
+              "primary-container": "#1a2b3c",
+              "on-primary": "#ffffff",
+              "secondary": "#0453cd",
+              "secondary-container": "#356ee7",
+              "on-secondary": "#ffffff",
+              "background": "#f8f9fa",
+              "surface": "#f8f9fa",
+              "surface-container-lowest": "#ffffff",
+              "surface-container-low": "#f3f4f5",
+              "surface-container": "#edeeef",
+              "surface-container-high": "#e7e8e9",
+              "surface-container-highest": "#e1e3e4",
+              "on-surface": "#191c1d",
+              "on-surface-variant": "#44474c",
+              "outline": "#74777d",
+              "outline-variant": "#c4c6cd",
+              "error": "#ba1a1a",
+              "error-container": "#ffdad6",
+              "on-error-container": "#93000a",
+              "on-tertiary-container": "#fc5561",
+              "success": "#16a34a",
+              "warning": "#d97706",
+              "danger": "#dc2626",
+            },
+            fontFamily: {
+              "headline": ["Manrope"],
+              "body": ["Inter"],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .mi { font-variation-settings: 'FILL' 1; }
+
+        .tab-btn { position: relative; }
+        .tab-btn.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            height: 2.5px;
+            background: linear-gradient(90deg, #0453cd, #356ee7);
+            border-radius: 2px 2px 0 0;
+        }
+
+        .bento {
+            background: rgba(255,255,255,0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(196,198,205,0.25);
+            border-radius: 1rem;
+            transition: box-shadow 0.3s ease, transform 0.2s ease;
+        }
+        .bento:hover {
+            box-shadow: 0 8px 32px rgba(4,22,39,0.08), 0 2px 8px rgba(4,22,39,0.04);
+            transform: translateY(-1px);
+        }
+
+        @keyframes fillBar { from { width: 0; } }
+        .animate-fill { animation: fillBar 0.8s ease-out; }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-up { animation: fadeUp 0.5s ease-out both; }
+        .fade-up-1 { animation-delay: 0.05s; }
+        .fade-up-2 { animation-delay: 0.1s; }
+        .fade-up-3 { animation-delay: 0.15s; }
+        .fade-up-4 { animation-delay: 0.2s; }
+
+        .risk-ring { position: relative; }
+        .risk-ring svg { transform: rotate(-90deg); }
+        .risk-ring circle { transition: stroke-dashoffset 1s ease-out; }
+
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        .risk-low { --risk-color: #16a34a; --risk-bg: #f0fdf4; }
+        .risk-medium { --risk-color: #d97706; --risk-bg: #fffbeb; }
+        .risk-high { --risk-color: #dc2626; --risk-bg: #fef2f2; }
+        .risk-critical { --risk-color: #7f1d1d; --risk-bg: #fef2f2; }
+
+        .sev-high { background: #fee2e2; color: #991b1b; }
+        .sev-medium { background: #fef3c7; color: #92400e; }
+        .sev-low { background: #dcfce7; color: #166534; }
+
+        /* Chart containers */
+        .chart-container { position: relative; width: 100%; }
+        .chart-container canvas { max-height: 280px; }
+
+        /* Gauge meter */
+        .gauge-arc { transition: stroke-dashoffset 1.2s ease-out; }
+        @keyframes needleSwing { from { transform: rotate(-90deg); } }
+        .gauge-needle { transform-origin: 120px 118px; animation: needleSwing 1s ease-out; }
+        .text-danger { color: #dc2626; }
+        .text-warning { color: #d97706; }
+        .text-success { color: #16a34a; }
+    </style>
 </head>
-<body>
-    <nav class="top-nav">
-        <a href="/" class="nav-logo">🔍 Audit<span class="accent">GPT</span></a>
-        <span class="nav-ticker">{{ company_info.name if company_info else ticker }}</span>
-        <span class="nav-time">Analyzed in {{ elapsed_time }}s</span>
-    </nav>
+<body class="bg-background text-on-surface font-body antialiased">
+<div class="relative flex min-h-screen w-full flex-col bg-surface-container-low overflow-x-hidden">
+<div class="layout-container flex h-full grow flex-col">
 
-    <div class="report-container">
-
-        <!-- ── RISK SCORE HERO ── -->
-        <section class="score-hero risk-{{ score.risk_color }}">
-            <div class="score-circle">
-                <span class="score-value">{{ score.overall_score }}</span>
-                <span class="score-label">/ 100</span>
+    <!-- ═══ UNIFIED HEADER + TABS ═══ -->
+    <header class="sticky top-0 z-50 bg-surface-container-lowest/95 backdrop-blur-md border-b border-outline-variant/15">
+        <div class="flex items-center px-6 md:px-10 h-14">
+            <a href="/" class="flex items-center gap-2.5 text-primary hover:opacity-80 transition-opacity mr-8 flex-shrink-0">
+                <div class="size-5">
+                    <svg fill="none" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                        <path clip-rule="evenodd" d="M47.2426 24L24 47.2426L0.757355 24L24 0.757355L47.2426 24ZM12.2426 21H35.7574L24 9.24264L12.2426 21Z" fill="currentColor" fill-rule="evenodd"/>
+                    </svg>
+                </div>
+                <span class="font-headline text-base font-bold tracking-tight">AuditGPT</span>
+            </a>
+            <nav class="flex items-center gap-0 h-full overflow-x-auto flex-1">
+                <button onclick="switchTab('overview')" data-tab="overview" class="tab-btn active flex items-center gap-1.5 px-4 h-full text-sm font-semibold text-primary hover:bg-surface-container-high/40 transition-colors whitespace-nowrap">
+                    <span class="material-symbols-outlined text-[18px] mi">dashboard</span> Overview
+                </button>
+                <button onclick="switchTab('financial')" data-tab="financial" class="tab-btn flex items-center gap-1.5 px-4 h-full text-sm font-semibold text-outline hover:text-primary hover:bg-surface-container-high/40 transition-colors whitespace-nowrap">
+                    <span class="material-symbols-outlined text-[18px] mi">table_chart</span> Financial Deep-Dive
+                </button>
+                <button onclick="switchTab('risk')" data-tab="risk" class="tab-btn flex items-center gap-1.5 px-4 h-full text-sm font-semibold text-outline hover:text-primary hover:bg-surface-container-high/40 transition-colors whitespace-nowrap">
+                    <span class="material-symbols-outlined text-[18px] mi">security</span> Risk Map
+                </button>
+                <button onclick="switchTab('peers')" data-tab="peers" class="tab-btn flex items-center gap-1.5 px-4 h-full text-sm font-semibold text-outline hover:text-primary hover:bg-surface-container-high/40 transition-colors whitespace-nowrap">
+                    <span class="material-symbols-outlined text-[18px] mi">groups</span> Peer Comparison
+                </button>
+            </nav>
+            <div class="flex items-center gap-3 flex-shrink-0 ml-4">
+                <span class="text-sm text-on-surface-variant font-body hidden md:inline">{{ company_info.name if company_info else ticker }}</span>
+                <span class="text-xs text-on-primary bg-primary px-3 py-1 rounded-full font-mono">{{ elapsed_time }}s</span>
             </div>
-            <div class="score-info">
-                <h1>{{ score.risk_level }} RISK</h1>
-                <p class="company-name">{{ company_info.name if company_info else ticker }}</p>
-                <p class="company-meta">{{ company_info.sector if company_info else '' }} · {{ company_info.industry if company_info else '' }}</p>
-                <div class="score-breakdown">
-                    <div class="breakdown-item">
-                        <span class="breakdown-label">Signal Score</span>
-                        <div class="breakdown-bar"><div class="breakdown-fill" style="width: {{ (score.breakdown.signal_score / score.breakdown.signal_max * 100)|round }}%"></div></div>
-                        <span class="breakdown-value">{{ score.breakdown.signal_score }}/{{ score.breakdown.signal_max }}</span>
-                    </div>
-                    <div class="breakdown-item">
-                        <span class="breakdown-label">Beneish Score</span>
-                        <div class="breakdown-bar"><div class="breakdown-fill" style="width: {{ (score.breakdown.beneish_score / score.breakdown.beneish_max * 100)|round }}%"></div></div>
-                        <span class="breakdown-value">{{ score.breakdown.beneish_score }}/{{ score.breakdown.beneish_max }}</span>
-                    </div>
-                    <div class="breakdown-item">
-                        <span class="breakdown-label">Trend Score</span>
-                        <div class="breakdown-bar"><div class="breakdown-fill" style="width: {{ (score.breakdown.trend_score / score.breakdown.trend_max * 100)|round }}%"></div></div>
-                        <span class="breakdown-value">{{ score.breakdown.trend_score }}/{{ score.breakdown.trend_max }}</span>
-                    </div>
-                </div>
-            </div>
-        </section>
+        </div>
+    </header>
 
-        <!-- ── AI FORENSIC REPORT ── -->
-        {% if ai_report %}
-        <section class="report-section ai-report-section">
-            <h2>🤖 AI Forensic Report</h2>
-            <div class="ai-report-content">
-                {{ ai_report | safe }}
-            </div>
-        </section>
-        {% endif %}
+    <main class="flex-1 px-4 md:px-8 lg:px-12 py-6 max-w-[1400px] mx-auto w-full">
 
-        <!-- ── SIGNAL SUMMARY ── -->
-        <section class="report-section">
-            <h2>📊 Signal Summary</h2>
-            <div class="signal-stats">
-                <div class="stat-card stat-total">
-                    <span class="stat-number">{{ signal_summary.total }}</span>
-                    <span class="stat-label">Total Red Flags</span>
-                </div>
-                <div class="stat-card stat-high">
-                    <span class="stat-number">{{ signal_summary.high_count }}</span>
-                    <span class="stat-label">High Severity</span>
-                </div>
-                <div class="stat-card stat-medium">
-                    <span class="stat-number">{{ signal_summary.medium_count }}</span>
-                    <span class="stat-label">Medium Severity</span>
-                </div>
-                <div class="stat-card stat-low">
-                    <span class="stat-number">{{ signal_summary.low_count }}</span>
-                    <span class="stat-label">Low Severity</span>
-                </div>
-            </div>
-        </section>
+    <!-- ════════════════════════════════════════════════ -->
+    <!--  TAB 1 · OVERVIEW                               -->
+    <!-- ════════════════════════════════════════════════ -->
+    <div id="tab-overview" class="tab-panel active">
+        <div class="grid grid-cols-12 gap-4 md:gap-5">
 
-        <!-- ── BENEISH M-SCORE ── -->
-        <section class="report-section">
-            <h2>🧮 Beneish M-Score</h2>
-            <div class="beneish-card">
-                <div class="mscore-value {% if beneish.is_likely_manipulator %}mscore-danger{% else %}mscore-safe{% endif %}">
-                    {% if beneish.m_score is not none %}
-                        M-Score: {{ beneish.m_score | round(4) }}
+            <!-- Risk Score Hero (8 cols) — GAUGE METER -->
+            <div class="col-span-12 lg:col-span-8 bento p-6 md:p-8 fade-up">
+                <div class="flex items-center justify-between mb-2">
+                    <h2 class="font-headline text-lg font-bold text-primary tracking-tight">FRAUD RISK SCORE</h2>
+                    {% if score.overall_score >= 70 %}
+                    <span class="text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded bg-red-100 text-red-700 border border-red-200">🚨 Critical Alert</span>
+                    {% elif score.overall_score >= 50 %}
+                    <span class="text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded bg-amber-100 text-amber-700 border border-amber-200">⚠️ High Alert</span>
+                    {% elif score.overall_score >= 30 %}
+                    <span class="text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded bg-yellow-100 text-yellow-700 border border-yellow-200">Moderate</span>
                     {% else %}
-                        M-Score: N/A
+                    <span class="text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded bg-green-100 text-green-700 border border-green-200">✓ Low Risk</span>
                     {% endif %}
                 </div>
-                <p class="mscore-interpretation">{{ beneish.interpretation }}</p>
-                
-                {% if beneish.components %}
-                <div class="mscore-components">
-                    <h4>Component Breakdown</h4>
-                    <div class="component-grid">
-                        {% for key, val in beneish.components.items() %}
-                        <div class="component-item">
-                            <span class="comp-name">{{ key }}</span>
-                            <span class="comp-value">{{ val | round(4) if val is not none else 'N/A' }}</span>
+
+                <div class="flex flex-col md:flex-row items-center gap-8">
+                    <!-- Gauge -->
+                    <div class="flex-shrink-0" style="width: 240px;">
+                        <svg width="240" height="120" viewBox="0 0 240 120" class="block mx-auto">
+                            <defs>
+                                <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                    <stop offset="0%" style="stop-color:#16a34a"/>
+                                    <stop offset="30%" style="stop-color:#eab308"/>
+                                    <stop offset="60%" style="stop-color:#d97706"/>
+                                    <stop offset="100%" style="stop-color:#dc2626"/>
+                                </linearGradient>
+                            </defs>
+                            <!-- Background arc -->
+                            <path d="M 20 115 A 100 100 0 0 1 220 115" fill="none" stroke="#f0f1f3" stroke-width="22" stroke-linecap="round"/>
+                            <!-- Colored arc (fills left to right) -->
+                            <path d="M 20 115 A 100 100 0 0 1 220 115" fill="none" stroke="url(#gaugeGrad)" stroke-width="22" stroke-linecap="round"
+                                stroke-dasharray="314.16"
+                                stroke-dashoffset="{{ 314.16 - (score.overall_score / 100 * 314.16) }}"
+                                class="gauge-arc"/>
+                        </svg>
+                        <!-- Score + labels below -->
+                        <div class="flex items-end justify-between px-1 -mt-1">
+                            <span class="text-[9px] text-outline font-bold uppercase">Minimal</span>
+                            <div class="text-center">
+                                <span class="text-4xl font-headline font-extrabold {{ 'text-danger' if score.overall_score >= 70 else ('text-warning' if score.overall_score >= 50 else ('text-yellow-500' if score.overall_score >= 30 else 'text-success')) }}">{{ score.overall_score }}</span>
+                                <span class="block text-[10px] text-outline uppercase tracking-widest font-bold">Risk Units</span>
+                            </div>
+                            <span class="text-[9px] text-danger font-bold uppercase">Critical</span>
                         </div>
+                    </div>
+
+                    <!-- Company info + breakdown -->
+                    <div class="flex-1 text-center md:text-left">
+                        <h1 class="font-headline text-2xl md:text-3xl font-extrabold text-primary mb-0.5">{{ score.risk_level }} RISK</h1>
+                        <p class="text-base text-on-surface-variant">{{ company_info.name if company_info else ticker }}</p>
+                        <p class="text-xs text-outline mb-4">{{ company_info.sector if company_info else '' }} · {{ company_info.industry if company_info else '' }}</p>
+                        <div class="flex flex-col md:flex-row gap-3">
+                            {% for label, key_score, key_max in [('Signal', 'signal_score', 'signal_max'), ('Beneish', 'beneish_score', 'beneish_max'), ('Trend', 'trend_score', 'trend_max')] %}
+                            <div class="flex-1">
+                                <div class="flex justify-between text-[11px] text-on-surface-variant mb-1">
+                                    <span class="font-semibold">{{ label }}</span>
+                                    <span class="font-bold text-primary">{{ score.breakdown[key_score] }}/{{ score.breakdown[key_max] }}</span>
+                                </div>
+                                <div class="w-full bg-surface-container-high h-[6px] rounded-full overflow-hidden">
+                                    <div class="bg-secondary h-full rounded-full animate-fill" style="width: {{ (score.breakdown[key_score] / score.breakdown[key_max] * 100)|round }}%"></div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Signal Summary (4 cols — 2×2) -->
+            <div class="col-span-12 lg:col-span-4 grid grid-cols-2 gap-4 md:gap-5">
+                <div class="bento p-4 text-center fade-up fade-up-1">
+                    <span class="material-symbols-outlined text-primary text-2xl mi mb-1">warning</span>
+                    <span class="block text-3xl font-headline font-extrabold text-primary">{{ signal_summary.total }}</span>
+                    <span class="block text-[10px] text-on-surface-variant uppercase tracking-wider font-bold mt-1">Total Flags</span>
+                </div>
+                <div class="bento p-4 text-center fade-up fade-up-2" style="background: rgba(254,226,226,0.5);">
+                    <span class="material-symbols-outlined text-danger text-2xl mi mb-1">crisis_alert</span>
+                    <span class="block text-3xl font-headline font-extrabold text-danger">{{ signal_summary.high_count }}</span>
+                    <span class="block text-[10px] text-danger uppercase tracking-wider font-bold mt-1">High</span>
+                </div>
+                <div class="bento p-4 text-center fade-up fade-up-3" style="background: rgba(254,243,199,0.5);">
+                    <span class="material-symbols-outlined text-warning text-2xl mi mb-1">report</span>
+                    <span class="block text-3xl font-headline font-extrabold text-warning">{{ signal_summary.medium_count }}</span>
+                    <span class="block text-[10px] text-warning uppercase tracking-wider font-bold mt-1">Medium</span>
+                </div>
+                <div class="bento p-4 text-center fade-up fade-up-4" style="background: rgba(220,252,231,0.5);">
+                    <span class="material-symbols-outlined text-success text-2xl mi mb-1">check_circle</span>
+                    <span class="block text-3xl font-headline font-extrabold text-success">{{ signal_summary.low_count }}</span>
+                    <span class="block text-[10px] text-success uppercase tracking-wider font-bold mt-1">Low</span>
+                </div>
+            </div>
+
+            <!-- AI Forensic Report (full width) -->
+            {% if ai_report %}
+            <div class="col-span-12 bento p-6 fade-up fade-up-3">
+                <div class="flex items-center gap-2 mb-3">
+                    <span class="material-symbols-outlined text-secondary mi">smart_toy</span>
+                    <h2 class="font-headline text-lg font-bold text-primary">AI Forensic Report</h2>
+                    <span class="ml-auto text-[10px] bg-secondary/10 text-secondary px-2 py-0.5 rounded-full font-bold">GEMINI</span>
+                </div>
+                <div class="prose prose-sm max-w-none text-on-surface-variant leading-relaxed">
+                    {{ ai_report | safe }}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <!--  TAB 2 · FINANCIAL DEEP-DIVE                    -->
+    <!-- ════════════════════════════════════════════════ -->
+    <div id="tab-financial" class="tab-panel">
+        <div class="grid grid-cols-12 gap-4 md:gap-5">
+
+            <!-- M-Score Hero Card (5 cols) -->
+            <div class="col-span-12 lg:col-span-5 bento p-6 fade-up {{ 'risk-high' if beneish.is_likely_manipulator else 'risk-low' }}">
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="material-symbols-outlined mi" style="color: var(--risk-color)">calculate</span>
+                    <h2 class="font-headline text-lg font-bold text-primary">Beneish M-Score</h2>
+                </div>
+                <div class="text-center py-4">
+                    <span class="text-5xl font-headline font-extrabold" style="color: var(--risk-color)">
+                        {% if beneish.m_score is not none %}{{ beneish.m_score | round(2) }}{% else %}N/A{% endif %}
+                    </span>
+                    <div class="mt-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold" style="background: var(--risk-bg); color: var(--risk-color);">
+                        <span class="material-symbols-outlined text-sm mi">{{ 'error' if beneish.is_likely_manipulator else 'verified' }}</span>
+                        {{ 'LIKELY MANIPULATOR' if beneish.is_likely_manipulator else 'UNLIKELY MANIPULATOR' }}
+                    </div>
+                </div>
+                <p class="text-xs text-on-surface-variant mt-3 text-center">{{ beneish.interpretation }}</p>
+            </div>
+
+            <!-- Component Cards (7 cols) -->
+            {% if beneish.components %}
+            <div class="col-span-12 lg:col-span-7 grid grid-cols-4 gap-3">
+                {% for key, val in beneish.components.items() %}
+                <div class="bento p-3 text-center fade-up" style="animation-delay: {{ loop.index * 0.04 }}s">
+                    <span class="block text-[10px] text-on-surface-variant font-semibold uppercase tracking-wider mb-1">{{ key }}</span>
+                    <span class="block text-xl font-headline font-bold text-primary">{{ val | round(3) if val is not none else 'N/A' }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- ★ CHART: Revenue vs Cash Flow (7 cols) -->
+            <div class="col-span-12 lg:col-span-7 bento p-6 fade-up fade-up-1">
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="material-symbols-outlined text-secondary mi">monitoring</span>
+                    <h3 class="font-headline text-base font-bold text-primary">Revenue vs Operating Cash Flow</h3>
+                    <span class="ml-auto text-[10px] text-outline">Key fraud indicator — divergence = 🚩</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="chartRevCF"></canvas>
+                </div>
+            </div>
+
+            <!-- ★ CHART: Debt Trend (5 cols) -->
+            <div class="col-span-12 lg:col-span-5 bento p-6 fade-up fade-up-2">
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="material-symbols-outlined text-danger mi">trending_up</span>
+                    <h3 class="font-headline text-base font-bold text-primary">Debt Trend</h3>
+                </div>
+                <div class="chart-container">
+                    <canvas id="chartDebt"></canvas>
+                </div>
+            </div>
+
+            <!-- ★ CHART: M-Score Trend (full width) -->
+            {% if beneish_trend %}
+            <div class="col-span-12 bento p-6 fade-up fade-up-3">
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="material-symbols-outlined text-warning mi">show_chart</span>
+                    <h3 class="font-headline text-base font-bold text-primary">M-Score Trend Over Years</h3>
+                    <span class="ml-auto text-[10px] text-outline">Danger zone: above -1.78</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="chartMScore"></canvas>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Financial Snapshot Table (full width) -->
+            <div class="col-span-12 bento p-6 fade-up fade-up-4">
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="material-symbols-outlined text-secondary mi">table_chart</span>
+                    <h3 class="font-headline text-base font-bold text-primary">Financial Data Snapshot</h3>
+                    <span class="ml-auto text-[10px] text-outline">Values in ₹ Crores</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <tr class="border-b border-outline-variant/20">
+                            <th class="text-left py-2 px-3 text-on-surface-variant font-bold text-xs uppercase tracking-wider sticky left-0 bg-white/90 backdrop-blur-sm">Metric</th>
+                            {% for year in financials.years %}
+                            <th class="py-2 px-3 text-primary font-bold">{{ year }}</th>
+                            {% endfor %}
+                        </tr>
+                        {% for metric_name, metric_key in [('Revenue', 'revenue'), ('Net Income', 'net_income'), ('Operating Cash Flow', 'operating_cash_flow'), ('Total Debt', 'total_debt'), ('Receivables', 'receivables'), ('Total Assets', 'total_assets'), ('Gross Profit', 'gross_profit')] %}
+                        <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low/50 transition-colors">
+                            <td class="py-2.5 px-3 text-on-surface-variant font-medium sticky left-0 bg-white/90 backdrop-blur-sm">{{ metric_name }}</td>
+                            {% for val in financials[metric_key] %}
+                            <td class="py-2.5 px-3 text-primary text-center font-mono text-xs">{% if val is not none %}₹{{ (val / 10000000)|round(0)|int }}{% else %}<span class="text-outline">—</span>{% endif %}</td>
+                            {% endfor %}
+                        </tr>
                         {% endfor %}
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <!--  TAB 3 · RISK MAP                               -->
+    <!-- ════════════════════════════════════════════════ -->
+    <div id="tab-risk" class="tab-panel">
+        <div class="grid grid-cols-12 gap-4 md:gap-5">
+
+            {% if auditor_sentiment and auditor_sentiment.years %}
+            <!-- Auditor Summary Stats (4 cols) -->
+            <div class="col-span-12 lg:col-span-4 flex flex-col gap-4">
+                <div class="bento p-5 text-center fade-up">
+                    <span class="material-symbols-outlined text-secondary mi text-2xl mb-1">gavel</span>
+                    <h3 class="font-headline text-sm font-bold text-primary uppercase tracking-widest mb-3">Auditor Sentiment</h3>
+                    <span class="block text-4xl font-headline font-extrabold {{ 'text-success' if auditor_sentiment.avg_score and auditor_sentiment.avg_score >= 70 else ('text-warning' if auditor_sentiment.avg_score and auditor_sentiment.avg_score >= 40 else 'text-danger') }}">
+                        {{ auditor_sentiment.avg_score if auditor_sentiment.avg_score else 'N/A' }}<span class="text-sm text-outline">/100</span>
+                    </span>
+                    <span class="block text-[10px] text-on-surface-variant mt-1">Average Score</span>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bento p-3 text-center fade-up fade-up-1">
+                        <span class="text-xl font-headline font-extrabold {{ 'text-danger' if auditor_sentiment.going_concern_count > 0 else 'text-success' }}">{{ auditor_sentiment.going_concern_count }}</span>
+                        <span class="block text-[9px] text-on-surface-variant uppercase tracking-wider font-bold">Going Concern</span>
+                    </div>
+                    <div class="bento p-3 text-center fade-up fade-up-2">
+                        <span class="text-xl font-headline font-extrabold {{ 'text-warning' if auditor_sentiment.related_party_count > 0 else 'text-success' }}">{{ auditor_sentiment.related_party_count }}</span>
+                        <span class="block text-[9px] text-on-surface-variant uppercase tracking-wider font-bold">Related Party</span>
+                    </div>
+                    <div class="bento p-3 text-center fade-up fade-up-3">
+                        <span class="text-xl font-headline font-extrabold {{ 'text-warning' if auditor_sentiment.auditor_changes > 0 else 'text-success' }}">{{ auditor_sentiment.auditor_changes }}</span>
+                        <span class="block text-[9px] text-on-surface-variant uppercase tracking-wider font-bold">Auditor Changes</span>
+                    </div>
+                    <div class="bento p-3 text-center fade-up fade-up-4">
+                        <span class="text-xl font-headline font-extrabold {{ 'text-danger' if auditor_sentiment.qualified_count > 0 else 'text-success' }}">{{ auditor_sentiment.qualified_count }}</span>
+                        <span class="block text-[9px] text-on-surface-variant uppercase tracking-wider font-bold">Qualified</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sentiment Timeline Cards (8 cols) -->
+            <div class="col-span-12 lg:col-span-8 bento p-6 fade-up fade-up-1">
+                <div class="flex items-center gap-2 mb-1">
+                    <h3 class="font-headline text-base font-bold text-primary">Sentiment Timeline</h3>
+                    <span class="ml-auto text-[10px] rounded-full px-2 py-0.5 font-bold {{ 'bg-green-100 text-green-800' if auditor_sentiment.has_pdfs else 'bg-blue-100 text-blue-800' }}">
+                        {{ '📄 PDF Source' if auditor_sentiment.has_pdfs else '🤖 AI Memory' }}
+                    </span>
+                </div>
+                {% if auditor_sentiment.summary %}
+                <p class="text-xs text-on-surface-variant mb-4 italic">{{ auditor_sentiment.summary }}</p>
+                {% endif %}
+                <div class="flex flex-col gap-2.5 max-h-[420px] overflow-y-auto pr-1">
+                    {% for yr in auditor_sentiment.years %}
+                    <div class="p-3.5 rounded-xl border border-outline-variant/15 bg-surface-container-low/60 hover:bg-surface-container-low transition-colors">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <div class="flex items-center gap-2">
+                                <span class="font-headline font-bold text-primary text-sm">FY{{ yr.year }}</span>
+                                {% if yr.source == 'PDF' %}<span class="text-[9px] bg-green-200 text-green-800 px-1.5 py-0.5 rounded font-bold">PDF</span>
+                                {% elif yr.source == 'AI_MEMORY' %}<span class="text-[9px] bg-blue-200 text-blue-800 px-1.5 py-0.5 rounded font-bold">AI</span>
+                                {% elif yr.source == 'UNAVAILABLE' %}<span class="text-[9px] bg-gray-200 text-gray-800 px-1.5 py-0.5 rounded font-bold">N/A</span>{% endif %}
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs px-2 py-0.5 rounded font-bold {{ 'bg-green-100 text-green-800' if yr.opinion_type == 'UNQUALIFIED' else ('bg-amber-100 text-amber-800' if yr.opinion_type == 'EMPHASIS_OF_MATTER' else ('bg-red-100 text-red-800' if yr.opinion_type in ['QUALIFIED', 'ADVERSE'] else 'bg-gray-100 text-gray-800')) }}">
+                                    {{ yr.opinion_type | replace('_', ' ') }}
+                                </span>
+                                <span class="text-sm font-bold {{ 'text-success' if yr.sentiment_score >= 70 else ('text-warning' if yr.sentiment_score >= 40 else 'text-danger') }}">{{ yr.sentiment_score }}</span>
+                            </div>
+                        </div>
+                        <div class="w-full bg-surface-container-high h-1 rounded-full overflow-hidden mb-1.5">
+                            <div class="h-full rounded-full animate-fill {{ 'bg-green-500' if yr.sentiment_score >= 70 else ('bg-amber-500' if yr.sentiment_score >= 40 else 'bg-red-500') }}" style="width: {{ yr.sentiment_score }}%"></div>
+                        </div>
+                        <div class="flex items-center gap-2 text-[10px] text-on-surface-variant">
+                            <span>{{ yr.auditor_name }}</span>
+                            <span class="text-outline">·</span>
+                            <span>{{ yr.language_tone }}</span>
+                            {% if yr.auditor_changed %}<span class="sev-medium px-1 py-0.5 rounded text-[9px]">🔄 Changed</span>{% endif %}
+                            {% if yr.going_concern %}<span class="sev-high px-1 py-0.5 rounded text-[9px]">💀 Concern</span>{% endif %}
+                            {% if yr.related_party_flag %}<span class="sev-medium px-1 py-0.5 rounded text-[9px]">🕸️ Related</span>{% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- ★ CHART: Auditor Sentiment Score Trend (full width) -->
+            <div class="col-span-12 bento p-6 fade-up fade-up-2">
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="material-symbols-outlined text-secondary mi">insights</span>
+                    <h3 class="font-headline text-base font-bold text-primary">Auditor Sentiment Score Trend</h3>
+                </div>
+                <div class="chart-container">
+                    <canvas id="chartSentiment"></canvas>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Red Flag Timeline (full width) — Modern Design -->
+            <div class="col-span-12 bento p-6 fade-up fade-up-3">
+                <div class="flex items-center justify-between mb-1">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined text-on-tertiary-container mi">flag</span>
+                        <h3 class="font-headline text-base font-bold text-primary">Red Flag Timeline</h3>
+                    </div>
+                    <div class="flex items-center gap-3 text-[10px]">
+                        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500 inline-block"></span> Critical</span>
+                        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block"></span> Medium</span>
+                        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-500 inline-block"></span> Low</span>
+                        <span class="text-outline ml-1">{{ signals|length if signals else 0 }} flags</span>
+                    </div>
+                </div>
+                <p class="text-[11px] text-on-surface-variant mb-5">Forensic anomalies detected across financial years</p>
+
+                {% if signals %}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {% for signal in signals %}
+                    <div class="group relative flex gap-3 p-4 rounded-xl border transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 cursor-default
+                        {{ 'bg-gradient-to-r from-red-50 to-white border-red-200/60' if signal.severity == 'high' else ('bg-gradient-to-r from-amber-50 to-white border-amber-200/60' if signal.severity == 'medium' else 'bg-gradient-to-r from-green-50 to-white border-green-200/60') }}">
+                        <!-- Severity dot + connector -->
+                        <div class="flex flex-col items-center pt-0.5">
+                            <span class="w-3 h-3 rounded-full ring-2 ring-offset-2 flex-shrink-0
+                                {{ 'bg-red-500 ring-red-200' if signal.severity == 'high' else ('bg-amber-500 ring-amber-200' if signal.severity == 'medium' else 'bg-green-500 ring-green-200') }}"></span>
+                            <span class="w-px flex-1 mt-1 {{ 'bg-red-200' if signal.severity == 'high' else ('bg-amber-200' if signal.severity == 'medium' else 'bg-green-200') }}"></span>
+                        </div>
+                        <!-- Content -->
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full
+                                    {{ 'bg-red-100 text-red-800' if signal.severity == 'high' else ('bg-amber-100 text-amber-800' if signal.severity == 'medium' else 'bg-green-100 text-green-800') }}">{{ signal.severity|upper }}</span>
+                                <span class="text-[10px] font-mono text-outline ml-auto">FY{{ signal.year }}</span>
+                            </div>
+                            <h4 class="font-headline font-bold text-primary text-[13px] leading-snug mb-1">{{ signal.name }}</h4>
+                            <p class="text-[11px] text-on-surface-variant leading-relaxed">{{ signal.explanation }}</p>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center py-10">
+                    <span class="material-symbols-outlined text-success text-5xl mi mb-3">verified</span>
+                    <p class="text-success font-bold text-lg">No red flags detected</p>
+                    <p class="text-outline text-sm mt-1">Company financials appear clean across all monitored signals.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════ -->
+    <!--  TAB 4 · PEER COMPARISON                        -->
+    <!-- ════════════════════════════════════════════════ -->
+    <div id="tab-peers" class="tab-panel">
+        <div class="grid grid-cols-12 gap-4 md:gap-5">
+
+            <!-- Company Metrics (top row cards) -->
+            {% for key, val in peer_comparison.company_metrics.items() %}
+            <div class="col-span-6 md:col-span-3 bento p-4 text-center fade-up" style="animation-delay: {{ loop.index * 0.04 }}s">
+                <span class="block text-[10px] text-on-surface-variant font-semibold uppercase tracking-wider capitalize mb-1">{{ key | replace('_', ' ') }}</span>
+                <span class="block text-2xl font-headline font-bold text-primary">
+                    {{ val if val is not none else 'N/A' }}{% if val is not none and ('margin' in key or 'roa' in key or 'roe' in key or 'conversion' in key) %}%{% elif val is not none and 'turnover' in key %}x{% endif %}
+                </span>
+                {% if peer_comparison.peer_averages and key in peer_comparison.peer_averages %}
+                <span class="block text-[10px] text-outline mt-0.5">Peer Avg: {{ peer_comparison.peer_averages[key] }}</span>
+                {% elif peer_comparison.industry_norms and key in peer_comparison.industry_norms %}
+                <span class="block text-[10px] text-outline mt-0.5">{{ peer_comparison.industry_norms[key].low }}–{{ peer_comparison.industry_norms[key].high }}</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+
+            <!-- ★ CHART: Peer Comparison Radar (6 cols) -->
+            <div class="col-span-12 lg:col-span-6 bento p-6 fade-up fade-up-2">
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="material-symbols-outlined text-secondary mi">radar</span>
+                    <h3 class="font-headline text-base font-bold text-primary">Peer Comparison Radar</h3>
+                </div>
+                <div class="chart-container" style="max-height: 320px;">
+                    <canvas id="chartRadar"></canvas>
+                </div>
+            </div>
+
+            <!-- Peer Info + Table (6 cols) -->
+            <div class="col-span-12 lg:col-span-6 flex flex-col gap-4">
+                <div class="bento p-4 fade-up fade-up-2">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="material-symbols-outlined text-secondary mi">groups</span>
+                        <h2 class="font-headline text-lg font-bold text-primary">{{ peer_comparison.sector }} Peers</h2>
+                    </div>
+                    <p class="text-sm text-on-surface-variant"><strong class="text-primary">Peers:</strong> {{ peer_comparison.peer_tickers | join(', ') }}</p>
+                    {% if peer_comparison.note %}
+                    <p class="text-[11px] text-outline mt-1 italic">{{ peer_comparison.note }}</p>
+                    {% endif %}
+                </div>
+
+                {% if peer_comparison.peer_data %}
+                <div class="bento p-5 fade-up fade-up-3 flex-1">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="border-b-2 border-outline-variant/20">
+                                    <th class="text-left py-2 px-2 text-on-surface-variant font-bold text-[10px] uppercase tracking-wider">Company</th>
+                                    <th class="py-2 px-2 text-on-surface-variant font-bold text-[10px] uppercase tracking-wider">PM</th>
+                                    <th class="py-2 px-2 text-on-surface-variant font-bold text-[10px] uppercase tracking-wider">D/E</th>
+                                    <th class="py-2 px-2 text-on-surface-variant font-bold text-[10px] uppercase tracking-wider">ROA</th>
+                                    <th class="py-2 px-2 text-on-surface-variant font-bold text-[10px] uppercase tracking-wider">ROE</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="bg-secondary/5 border-b border-outline-variant/10 font-bold">
+                                    <td class="py-2 px-2 text-primary text-xs flex items-center gap-1">
+                                        <span class="w-2 h-2 rounded-full bg-secondary inline-block"></span>
+                                        {{ peer_comparison.ticker | replace('.NS', '') }}
+                                    </td>
+                                    <td class="py-2 px-2 text-center text-xs">{{ peer_comparison.company_metrics.profit_margin if peer_comparison.company_metrics.profit_margin is not none else '—' }}</td>
+                                    <td class="py-2 px-2 text-center text-xs">{{ peer_comparison.company_metrics.debt_to_equity if peer_comparison.company_metrics.debt_to_equity is not none else '—' }}</td>
+                                    <td class="py-2 px-2 text-center text-xs">{{ peer_comparison.company_metrics.roa if peer_comparison.company_metrics.roa is not none else '—' }}</td>
+                                    <td class="py-2 px-2 text-center text-xs">{{ peer_comparison.company_metrics.roe if peer_comparison.company_metrics.roe is not none else '—' }}</td>
+                                </tr>
+                                {% for p_ticker, p_vals in peer_comparison.peer_data.items() %}
+                                <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low/50 transition-colors">
+                                    <td class="py-2 px-2 text-on-surface-variant text-xs flex items-center gap-1">
+                                        <span class="w-2 h-2 rounded-full bg-outline-variant inline-block"></span>
+                                        {{ p_ticker | replace('.NS', '') }}
+                                    </td>
+                                    <td class="py-2 px-2 text-center text-xs">{{ p_vals.profit_margin if p_vals.profit_margin is not none else '—' }}</td>
+                                    <td class="py-2 px-2 text-center text-xs">{{ p_vals.debt_to_equity if p_vals.debt_to_equity is not none else '—' }}</td>
+                                    <td class="py-2 px-2 text-center text-xs">{{ p_vals.roa if p_vals.roa is not none else '—' }}</td>
+                                    <td class="py-2 px-2 text-center text-xs">{{ p_vals.roe if p_vals.roe is not none else '—' }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
                 {% endif %}
             </div>
 
-            {% if beneish_trend %}
-            <div class="trend-section">
-                <h4>M-Score Trend Over Years</h4>
-                <div class="trend-table">
-                    <table>
-                        <tr>
-                            <th>Year</th>
-                            {% for item in beneish_trend %}
-                            <th>{{ item.year if item.year else 'N/A' }}</th>
-                            {% endfor %}
-                        </tr>
-                        <tr>
-                            <td>M-Score</td>
-                            {% for item in beneish_trend %}
-                            <td class="{% if item.m_score is not none and item.m_score > -1.78 %}danger-cell{% elif item.m_score is not none and item.m_score > -2.22 %}warning-cell{% else %}safe-cell{% endif %}">
-                                {{ item.m_score | round(4) if item.m_score is not none else 'N/A' }}
-                            </td>
-                            {% endfor %}
-                        </tr>
-                        <tr>
-                            <td>Verdict</td>
-                            {% for item in beneish_trend %}
-                            <td>
-                                {% if item.is_likely_manipulator == true %}🔴 Likely{% elif item.is_likely_manipulator == false %}🟢 Unlikely{% else %}—{% endif %}
-                            </td>
-                            {% endfor %}
-                        </tr>
-                    </table>
-                </div>
-            </div>
-            {% endif %}
-        </section>
-
-        <!-- ── RED FLAG TIMELINE ── -->
-        <section class="report-section">
-            <h2>🚩 Red Flag Timeline</h2>
-            {% if signals %}
-            <div class="signals-list">
-                {% for signal in signals %}
-                <div class="signal-card severity-{{ signal.severity }}">
-                    <div class="signal-header">
-                        <span class="signal-severity {{ signal.severity }}">{{ signal.severity|upper }}</span>
-                        <span class="signal-year">{{ signal.year }}</span>
-                    </div>
-                    <h4 class="signal-name">{{ signal.name }}</h4>
-                    <p class="signal-explanation">{{ signal.explanation }}</p>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="no-data">No red flags detected — company appears clean.</p>
-            {% endif %}
-        </section>
-
-        <!-- ── PEER COMPARISON ── -->
-        <section class="report-section">
-            <h2>🏢 Industry Peer Comparison — {{ peer_comparison.sector }}</h2>
-            <div class="peer-info">
-                <p><strong>Sector:</strong> {{ peer_comparison.sector }}</p>
-                <p><strong>Peer Companies:</strong> {{ peer_comparison.peer_tickers | join(', ') }}</p>
-                <p class="peer-note">{{ peer_comparison.note }}</p>
-            </div>
-
-            <div class="metrics-grid">
-                {% for key, val in peer_comparison.company_metrics.items() %}
-                <div class="metric-card">
-                    <span class="metric-name">{{ key | replace('_', ' ') | title }}</span>
-                    <span class="metric-value">{{ val if val is not none else 'N/A' }}{% if val is not none and ('margin' in key or 'roa' in key or 'roe' in key or 'conversion' in key) %}%{% elif val is not none and 'turnover' in key %}x{% endif %}</span>
-                    {% if peer_comparison.peer_averages and key in peer_comparison.peer_averages %}
-                    <span class="metric-norm">Peer Avg: {{ peer_comparison.peer_averages[key] }}{% if 'margin' in key or 'roa' in key or 'roe' in key or 'conversion' in key %}%{% endif %}</span>
-                    {% elif peer_comparison.industry_norms and key in peer_comparison.industry_norms %}
-                    <span class="metric-norm">{{ peer_comparison.sector }} norm: {{ peer_comparison.industry_norms[key].low }} – {{ peer_comparison.industry_norms[key].high }}</span>
-                    {% endif %}
-                </div>
-                {% endfor %}
-            </div>
-
-            {% if peer_comparison.peer_data %}
-            <div class="peer-table-wrap">
-                <h4>📊 Peer Breakdown</h4>
-                <table class="peer-table">
-                    <thead>
-                        <tr>
-                            <th>Company</th>
-                            <th>Profit Margin</th>
-                            <th>D/E</th>
-                            <th>ROA</th>
-                            <th>ROE</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr class="peer-row-target">
-                            <td><strong>{{ peer_comparison.ticker }}</strong> (You)</td>
-                            <td>{{ peer_comparison.company_metrics.profit_margin if peer_comparison.company_metrics.profit_margin is not none else 'N/A' }}%</td>
-                            <td>{{ peer_comparison.company_metrics.debt_to_equity if peer_comparison.company_metrics.debt_to_equity is not none else 'N/A' }}</td>
-                            <td>{{ peer_comparison.company_metrics.roa if peer_comparison.company_metrics.roa is not none else 'N/A' }}%</td>
-                            <td>{{ peer_comparison.company_metrics.roe if peer_comparison.company_metrics.roe is not none else 'N/A' }}%</td>
-                        </tr>
-                        {% for p_ticker, p_vals in peer_comparison.peer_data.items() %}
-                        <tr>
-                            <td>{{ p_ticker | replace('.NS', '') }}</td>
-                            <td>{{ p_vals.profit_margin if p_vals.profit_margin is not none else 'N/A' }}{% if p_vals.profit_margin is not none %}%{% endif %}</td>
-                            <td>{{ p_vals.debt_to_equity if p_vals.debt_to_equity is not none else 'N/A' }}</td>
-                            <td>{{ p_vals.roa if p_vals.roa is not none else 'N/A' }}{% if p_vals.roa is not none %}%{% endif %}</td>
-                            <td>{{ p_vals.roe if p_vals.roe is not none else 'N/A' }}{% if p_vals.roe is not none %}%{% endif %}</td>
-                        </tr>
-                        {% endfor %}
-                        {% if peer_comparison.peer_averages %}
-                        <tr class="peer-row-avg">
-                            <td><strong>Peer Average</strong></td>
-                            <td>{{ peer_comparison.peer_averages.get('profit_margin', 'N/A') }}{% if peer_comparison.peer_averages.get('profit_margin') is not none %}%{% endif %}</td>
-                            <td>{{ peer_comparison.peer_averages.get('debt_to_equity', 'N/A') }}</td>
-                            <td>{{ peer_comparison.peer_averages.get('roa', 'N/A') }}{% if peer_comparison.peer_averages.get('roa') is not none %}%{% endif %}</td>
-                            <td>{{ peer_comparison.peer_averages.get('roe', 'N/A') }}{% if peer_comparison.peer_averages.get('roe') is not none %}%{% endif %}</td>
-                        </tr>
-                        {% endif %}
-                    </tbody>
-                </table>
-            </div>
-            {% endif %}
-
+            <!-- Context Flags -->
             {% if peer_comparison.flags %}
-            <div class="peer-flags">
-                <h4>⚠️ Industry-Contextualised Flags</h4>
-                {% for flag in peer_comparison.flags %}
-                <div class="peer-flag severity-{{ flag.severity }}">
-                    <span class="flag-severity-badge {{ flag.severity }}">{{ flag.severity | upper }}</span>
-                    <strong>{{ flag.metric }}:</strong> {{ flag.value }}
-                    {% if flag.peer_avg is defined and flag.peer_avg is not none %}
-                    <span class="flag-range">(Peer Avg: {{ flag.peer_avg }})</span>
-                    {% else %}
-                    <span class="flag-range">({{ peer_comparison.sector }} norm: {{ flag.sector_range }})</span>
-                    {% endif %}
-                    <br><span class="flag-reason">{{ flag.concern }}</span>
+            <div class="col-span-12 bento p-6 fade-up fade-up-4">
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="material-symbols-outlined text-warning mi">warning</span>
+                    <h3 class="font-headline text-base font-bold text-primary">Industry-Contextualised Flags</h3>
                 </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <div class="peer-flags">
-                <p style="color: var(--success);">✅ All metrics within {{ peer_comparison.sector }} industry norms.</p>
-            </div>
-            {% endif %}
-        </section>
-
-        <!-- ── AUDITOR SENTIMENT TIMELINE ── -->
-        {% if auditor_sentiment and auditor_sentiment.years %}
-        <section class="report-section auditor-section">
-            <h2>🏛️ Auditor Note Sentiment Analysis</h2>
-            {% if auditor_sentiment.has_pdfs %}
-            <div class="source-indicator source-pdf">
-                📄 Source: Real Annual Report PDFs ({{ auditor_sentiment.source_summary }})
-            </div>
-            {% else %}
-            <div class="source-indicator source-ai">
-                🤖 Source: AI analysis from public financial knowledge
-            </div>
-            {% endif %}
-
-            <!-- Summary stats bar -->
-            <div class="auditor-summary">
-                <div class="auditor-stat">
-                    <span class="auditor-stat-value {% if auditor_sentiment.avg_score and auditor_sentiment.avg_score >= 70 %}text-safe{% elif auditor_sentiment.avg_score and auditor_sentiment.avg_score >= 40 %}text-warning{% else %}text-danger{% endif %}">
-                        {{ auditor_sentiment.avg_score if auditor_sentiment.avg_score else 'N/A' }}
-                    </span>
-                    <span class="auditor-stat-label">Avg Sentiment /100</span>
-                </div>
-                <div class="auditor-stat">
-                    <span class="auditor-stat-value {% if auditor_sentiment.going_concern_count > 0 %}text-danger{% else %}text-safe{% endif %}">
-                        {{ auditor_sentiment.going_concern_count }}
-                    </span>
-                    <span class="auditor-stat-label">Going Concern</span>
-                </div>
-                <div class="auditor-stat">
-                    <span class="auditor-stat-value {% if auditor_sentiment.related_party_count > 0 %}text-warning{% else %}text-safe{% endif %}">
-                        {{ auditor_sentiment.related_party_count }}
-                    </span>
-                    <span class="auditor-stat-label">Related Party Flags</span>
-                </div>
-                <div class="auditor-stat">
-                    <span class="auditor-stat-value {% if auditor_sentiment.auditor_changes > 0 %}text-warning{% else %}text-safe{% endif %}">
-                        {{ auditor_sentiment.auditor_changes }}
-                    </span>
-                    <span class="auditor-stat-label">Auditor Changes</span>
-                </div>
-                <div class="auditor-stat">
-                    <span class="auditor-stat-value {% if auditor_sentiment.qualified_count > 0 %}text-danger{% else %}text-safe{% endif %}">
-                        {{ auditor_sentiment.qualified_count }}
-                    </span>
-                    <span class="auditor-stat-label">Qualified Opinions</span>
-                </div>
-            </div>
-
-            {% if auditor_sentiment.summary %}
-            <p class="auditor-overview">{{ auditor_sentiment.summary }}</p>
-            {% endif %}
-
-            <!-- Year-by-year timeline -->
-            <div class="auditor-timeline">
-                {% for yr in auditor_sentiment.years %}
-                <div class="auditor-year-card">
-                    <div class="auditor-year-header">
-                        <span class="auditor-year-label">FY{{ yr.year }}
-                            {% if yr.source == 'PDF' %}<span class="source-badge badge-pdf">📄 PDF</span>{% elif yr.source == 'AI_MEMORY' %}<span class="source-badge badge-ai">🤖 AI</span>{% endif %}
-                        </span>
-                        <span class="auditor-opinion opinion-{{ yr.opinion_type | lower | replace(' ', '_') }}">
-                            {% if yr.opinion_type == 'UNQUALIFIED' %}✅{% elif yr.opinion_type == 'EMPHASIS_OF_MATTER' %}⚠️{% elif yr.opinion_type == 'QUALIFIED' %}🚩{% elif yr.opinion_type == 'ADVERSE' %}🔴{% else %}❌{% endif %}
-                            {{ yr.opinion_type | replace('_', ' ') }}
-                        </span>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {% for flag in peer_comparison.flags %}
+                    <div class="p-3.5 rounded-xl border {{ 'bg-red-50/60 border-red-200/50' if flag.severity == 'high' else ('bg-amber-50/60 border-amber-200/50' if flag.severity == 'medium' else 'bg-surface-container-low border-outline-variant/10') }}">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full {{ 'sev-high' if flag.severity == 'high' else ('sev-medium' if flag.severity == 'medium' else 'sev-low') }}">{{ flag.severity | upper }}</span>
+                            <strong class="text-primary text-sm">{{ flag.metric }}</strong>
+                        </div>
+                        <p class="text-xs text-on-surface-variant">{{ flag.value }}
+                            {% if flag.peer_avg is defined and flag.peer_avg is not none %}
+                            <span class="text-outline">(Peer Avg: {{ flag.peer_avg }})</span>
+                            {% else %}
+                            <span class="text-outline">({{ peer_comparison.sector }} norm: {{ flag.sector_range }})</span>
+                            {% endif %}
+                        </p>
+                        <p class="text-[11px] text-on-surface-variant mt-1">{{ flag.concern }}</p>
                     </div>
-
-                    <div class="auditor-year-body">
-                        <div class="auditor-score-row">
-                            <span class="auditor-firm">{{ yr.auditor_name }}</span>
-                            <span class="auditor-score {% if yr.sentiment_score >= 70 %}text-safe{% elif yr.sentiment_score >= 40 %}text-warning{% else %}text-danger{% endif %}">
-                                {{ yr.sentiment_score }}/100
-                            </span>
-                        </div>
-
-                        <div class="auditor-score-bar">
-                            <div class="auditor-score-fill {% if yr.sentiment_score >= 70 %}fill-safe{% elif yr.sentiment_score >= 40 %}fill-warning{% else %}fill-danger{% endif %}" style="width: {{ yr.sentiment_score }}%"></div>
-                        </div>
-
-                        <div class="auditor-tone">
-                            Tone: <span class="tone-badge tone-{{ yr.language_tone | lower }}">{{ yr.language_tone }}</span>
-                            {% if yr.auditor_changed %}<span class="flag-badge flag-change">🔄 Auditor Changed</span>{% endif %}
-                            {% if yr.going_concern %}<span class="flag-badge flag-danger">💀 Going Concern</span>{% endif %}
-                            {% if yr.related_party_flag %}<span class="flag-badge flag-warning">🕸️ Related Party</span>{% endif %}
-                        </div>
-
-                        {% if yr.key_issues %}
-                        <div class="auditor-issues">
-                            {% for issue in yr.key_issues[:3] %}
-                            <div class="auditor-issue">↳ {{ issue }}</div>
-                            {% endfor %}
-                        </div>
-                        {% endif %}
-
-                        {% if yr.page_references %}
-                        <div class="auditor-pages">
-                            📑 Pages:
-                            {% if yr.page_references.auditor_report and yr.page_references.auditor_report != 'Not found' %}
-                            <span class="page-ref">Audit Report: p.{{ yr.page_references.auditor_report }}</span>
-                            {% endif %}
-                            {% if yr.page_references.key_audit_matters and yr.page_references.key_audit_matters != 'Not found' %}
-                            <span class="page-ref">KAM: p.{{ yr.page_references.key_audit_matters }}</span>
-                            {% endif %}
-                            {% if yr.page_references.related_party and yr.page_references.related_party != 'Not found' %}
-                            <span class="page-ref">Related Party: p.{{ yr.page_references.related_party }}</span>
-                            {% endif %}
-                        </div>
-                        {% endif %}
-
-                        {% if yr.notable_findings %}
-                        <div class="auditor-findings">
-                            {% for finding in yr.notable_findings[:3] %}
-                            <div class="auditor-finding">📌 {{ finding }}</div>
-                            {% endfor %}
-                        </div>
-                        {% endif %}
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-        </section>
-        {% endif %}
-
-        <!-- ── FINANCIAL DATA SNAPSHOT ── -->
-        <section class="report-section">
-            <h2>📈 Financial Data Snapshot</h2>
-            <div class="fin-table-wrapper">
-                <table class="fin-table">
-                    <tr>
-                        <th>Metric</th>
-                        {% for year in financials.years %}
-                        <th>{{ year }}</th>
-                        {% endfor %}
-                    </tr>
-                    {% for metric_name, metric_key in [('Revenue', 'revenue'), ('Net Income', 'net_income'), ('Operating Cash Flow', 'operating_cash_flow'), ('Total Debt', 'total_debt'), ('Receivables', 'receivables'), ('Total Assets', 'total_assets'), ('Gross Profit', 'gross_profit')] %}
-                    <tr>
-                        <td>{{ metric_name }}</td>
-                        {% for val in financials[metric_key] %}
-                        <td>{% if val is not none %}₹{{ (val / 10000000)|round(0)|int }} Cr{% else %}N/A{% endif %}</td>
-                        {% endfor %}
-                    </tr>
                     {% endfor %}
-                </table>
+                </div>
             </div>
-        </section>
-
-        <footer class="report-footer">
-            <p>Generated by <strong>AuditGPT</strong> — AI-Powered Forensic Financial Auditing</p>
-            <p>This report is for educational and research purposes only. Not financial advice.</p>
-        </footer>
+            {% else %}
+            <div class="col-span-12 bento p-6 text-center fade-up fade-up-4">
+                <span class="material-symbols-outlined text-success text-3xl mi mb-2">verified</span>
+                <p class="text-success font-bold text-sm">All metrics within {{ peer_comparison.sector }} industry norms.</p>
+            </div>
+            {% endif %}
+        </div>
     </div>
+
+    <!-- Footer -->
+    <footer class="text-center py-8 text-xs text-outline mt-8">
+        <p>Generated by <strong class="text-primary">AuditGPT</strong> — AI-Powered Forensic Financial Auditing</p>
+        <p class="mt-1">For educational and research purposes only. Not financial advice.</p>
+    </footer>
+    </main>
+</div>
+</div>
+
+<!-- ═══ TAB SWITCHING ═══ -->
+<script>
+function switchTab(tabName) {
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('active', 'text-primary');
+        b.classList.add('text-outline');
+    });
+    document.getElementById('tab-' + tabName).classList.add('active');
+    const btn = document.querySelector('[data-tab="' + tabName + '"]');
+    btn.classList.add('active', 'text-primary');
+    btn.classList.remove('text-outline');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    // Re-render charts when tab becomes visible (Chart.js needs visible canvas)
+    setTimeout(() => {
+        if (tabName === 'financial') { initFinancialCharts(); }
+        if (tabName === 'risk') { initRiskCharts(); }
+        if (tabName === 'peers') { initPeerCharts(); }
+    }, 50);
+}
+</script>
+
+<!-- ═══ CHART.JS DATA & INITIALIZATION ═══ -->
+<script>
+// ── Shared chart defaults ──
+Chart.defaults.font.family = 'Inter, sans-serif';
+Chart.defaults.font.size = 11;
+Chart.defaults.color = '#74777d';
+Chart.defaults.plugins.legend.labels.usePointStyle = true;
+Chart.defaults.plugins.legend.labels.pointStyleWidth = 8;
+Chart.defaults.elements.line.tension = 0.35;
+Chart.defaults.elements.point.radius = 3;
+Chart.defaults.elements.point.hoverRadius = 6;
+Chart.defaults.responsive = true;
+Chart.defaults.maintainAspectRatio = false;
+
+// ── Template data (pre-serialized in Python to avoid Jinja2 Undefined issues) ──
+const chartData = {{ chart_data_json|safe }};
+
+// Convert to crores
+const toCr = (v) => v !== null && v !== undefined ? Math.round(v / 10000000) : null;
+const revCr = chartData.revenue.map(toCr);
+const cfCr = chartData.cashflow.map(toCr);
+const debtCr = chartData.debt.map(toCr);
+
+// Track chart instances so we don't create duplicates
+let chartInstances = {};
+
+function destroyChart(id) {
+    if (chartInstances[id]) {
+        chartInstances[id].destroy();
+        delete chartInstances[id];
+    }
+}
+
+// ──────────────────────────────
+// CHART 1: Revenue vs Cash Flow
+// CHART 2: Debt Trend
+// CHART 3: M-Score Trend
+// ──────────────────────────────
+function initFinancialCharts() {
+    // 1) Revenue vs Cash Flow (dual line)
+    const c1 = document.getElementById('chartRevCF');
+    if (c1) {
+        destroyChart('revCF');
+        chartInstances['revCF'] = new Chart(c1, {
+            type: 'line',
+            data: {
+                labels: chartData.years,
+                datasets: [
+                    {
+                        label: 'Revenue (₹ Cr)',
+                        data: revCr,
+                        borderColor: '#0453cd',
+                        backgroundColor: 'rgba(4,83,205,0.08)',
+                        fill: true,
+                        borderWidth: 2.5,
+                    },
+                    {
+                        label: 'Operating Cash Flow (₹ Cr)',
+                        data: cfCr,
+                        borderColor: '#16a34a',
+                        backgroundColor: 'rgba(22,163,74,0.08)',
+                        fill: true,
+                        borderWidth: 2.5,
+                    }
+                ]
+            },
+            options: {
+                plugins: {
+                    tooltip: {
+                        callbacks: { label: ctx => ctx.dataset.label + ': ₹' + (ctx.parsed.y !== null ? ctx.parsed.y.toLocaleString() : 'N/A') + ' Cr' }
+                    }
+                },
+                scales: {
+                    y: {
+                        grid: { color: 'rgba(196,198,205,0.15)' },
+                        ticks: { callback: v => '₹' + v.toLocaleString() }
+                    },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    // 2) Debt Trend (bar chart)
+    const c2 = document.getElementById('chartDebt');
+    if (c2) {
+        destroyChart('debt');
+        chartInstances['debt'] = new Chart(c2, {
+            type: 'bar',
+            data: {
+                labels: chartData.years,
+                datasets: [{
+                    label: 'Total Debt (₹ Cr)',
+                    data: debtCr,
+                    backgroundColor: debtCr.map((v, i) => {
+                        if (i === 0 || !debtCr[i-1] || !v) return 'rgba(4,83,205,0.6)';
+                        return v > debtCr[i-1] * 1.15 ? 'rgba(220,38,38,0.7)' : 'rgba(4,83,205,0.6)';
+                    }),
+                    borderColor: debtCr.map((v, i) => {
+                        if (i === 0 || !debtCr[i-1] || !v) return '#0453cd';
+                        return v > debtCr[i-1] * 1.15 ? '#dc2626' : '#0453cd';
+                    }),
+                    borderWidth: 1.5,
+                    borderRadius: 6,
+                }]
+            },
+            options: {
+                plugins: {
+                    tooltip: { callbacks: { label: ctx => '₹' + (ctx.parsed.y !== null ? ctx.parsed.y.toLocaleString() : 'N/A') + ' Cr' } },
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        grid: { color: 'rgba(196,198,205,0.15)' },
+                        ticks: { callback: v => '₹' + v.toLocaleString() }
+                    },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    // 3) M-Score Trend (line with danger zone)
+    const c3 = document.getElementById('chartMScore');
+    if (c3 && chartData.mscoreYears.length > 0) {
+        destroyChart('mscore');
+        const dangerLine = chartData.mscoreYears.map(() => -1.78);
+        chartInstances['mscore'] = new Chart(c3, {
+            type: 'line',
+            data: {
+                labels: chartData.mscoreYears,
+                datasets: [
+                    {
+                        label: 'M-Score',
+                        data: chartData.mscoreVals,
+                        borderColor: '#d97706',
+                        backgroundColor: 'rgba(217,119,6,0.1)',
+                        fill: true,
+                        borderWidth: 2.5,
+                        pointBackgroundColor: chartData.mscoreVals.map(v => v !== null && v > -1.78 ? '#dc2626' : '#16a34a'),
+                        pointRadius: 5,
+                    },
+                    {
+                        label: 'Danger Threshold (-1.78)',
+                        data: dangerLine,
+                        borderColor: 'rgba(220,38,38,0.5)',
+                        borderDash: [8, 4],
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        fill: false,
+                    }
+                ]
+            },
+            options: {
+                plugins: {
+                    tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + (ctx.parsed.y !== null ? ctx.parsed.y.toFixed(3) : 'N/A') } }
+                },
+                scales: {
+                    y: {
+                        grid: { color: 'rgba(196,198,205,0.15)' },
+                    },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+}
+
+// ──────────────────────────────
+// CHART 4: Auditor Sentiment
+// ──────────────────────────────
+function initRiskCharts() {
+    const c4 = document.getElementById('chartSentiment');
+    if (c4 && chartData.sentYears.length > 0) {
+        destroyChart('sentiment');
+        chartInstances['sentiment'] = new Chart(c4, {
+            type: 'line',
+            data: {
+                labels: chartData.sentYears.map(y => 'FY' + y),
+                datasets: [{
+                    label: 'Sentiment Score',
+                    data: chartData.sentScores,
+                    borderColor: '#0453cd',
+                    backgroundColor: (ctx) => {
+                        const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, 250);
+                        g.addColorStop(0, 'rgba(4,83,205,0.2)');
+                        g.addColorStop(1, 'rgba(4,83,205,0.0)');
+                        return g;
+                    },
+                    fill: true,
+                    borderWidth: 2.5,
+                    pointBackgroundColor: chartData.sentScores.map(s => s >= 70 ? '#16a34a' : (s >= 40 ? '#d97706' : '#dc2626')),
+                    pointRadius: 5,
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                }]
+            },
+            options: {
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: ctx => 'Score: ' + ctx.parsed.y + '/100' } }
+                },
+                scales: {
+                    y: {
+                        min: 0, max: 100,
+                        grid: { color: 'rgba(196,198,205,0.15)' },
+                        ticks: { stepSize: 20 }
+                    },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+}
+
+// ──────────────────────────────
+// CHART 5: Peer Comparison Radar
+// ──────────────────────────────
+function initPeerCharts() {
+    const c5 = document.getElementById('chartRadar');
+    if (!c5) return;
+    destroyChart('radar');
+
+    // Pick metrics that exist in both company and peer data
+    const metricKeys = Object.keys(chartData.peerMetrics).filter(k => k in chartData.peerAvgs);
+    const labels = metricKeys.map(k => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
+    const companyVals = metricKeys.map(k => chartData.peerMetrics[k]);
+    const peerVals = metricKeys.map(k => chartData.peerAvgs[k]);
+
+    // Normalize: scale each metric to 0-100 range for radar
+    const allVals = metricKeys.map((k, i) => [companyVals[i], peerVals[i]].filter(v => v !== null && v !== undefined));
+    const maxVals = allVals.map(arr => Math.max(...arr.map(Math.abs), 1));
+    const normCompany = companyVals.map((v, i) => v !== null ? Math.abs(v) / maxVals[i] * 100 : 0);
+    const normPeer = peerVals.map((v, i) => v !== null ? Math.abs(v) / maxVals[i] * 100 : 0);
+
+    chartInstances['radar'] = new Chart(c5, {
+        type: 'radar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: '{{ ticker | replace(".NS", "") }}',
+                    data: normCompany,
+                    borderColor: '#0453cd',
+                    backgroundColor: 'rgba(4,83,205,0.15)',
+                    borderWidth: 2.5,
+                    pointBackgroundColor: '#0453cd',
+                },
+                {
+                    label: 'Peer Average',
+                    data: normPeer,
+                    borderColor: '#d97706',
+                    backgroundColor: 'rgba(217,119,6,0.1)',
+                    borderWidth: 2,
+                    borderDash: [4, 4],
+                    pointBackgroundColor: '#d97706',
+                }
+            ]
+        },
+        options: {
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            const idx = ctx.dataIndex;
+                            const key = metricKeys[idx];
+                            const rawVal = ctx.datasetIndex === 0 ? chartData.peerMetrics[key] : chartData.peerAvgs[key];
+                            return ctx.dataset.label + ': ' + (rawVal !== null ? rawVal : 'N/A');
+                        }
+                    }
+                }
+            },
+            scales: {
+                r: {
+                    beginAtZero: true,
+                    max: 100,
+                    ticks: { display: false },
+                    grid: { color: 'rgba(196,198,205,0.2)' },
+                    angleLines: { color: 'rgba(196,198,205,0.2)' },
+                    pointLabels: { font: { size: 10, family: 'Inter' } }
+                }
+            }
+        }
+    });
+}
+
+// Initialize charts for the default visible tab
+document.addEventListener('DOMContentLoaded', () => {
+    // Overview tab is default, no charts there
+    // Pre-init financial charts in case user clicks that tab
+});
+</script>
 </body>
 </html>

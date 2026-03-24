@@ -204,7 +204,8 @@ def calculate_beneish_mscore(financials: dict, year_idx: int = -1) -> dict:
             "m_score": None,
             "components": components,
             "is_likely_manipulator": None,
-            "interpretation": "Some components could not be calculated due to missing data."
+            "interpretation": "Some components could not be calculated due to missing data.",
+            "year": financials["years"][year_idx] if year_idx < len(financials.get("years", [])) else None,
         }
 
     # Beneish M-Score formula

@@ -159,8 +159,57 @@ def benchmark_against_peers(ticker: str, financials: dict, peers_csv_path: str =
     Every flag is contextualised against what is normal for that industry.
     """
     raw_sector = financials.get("sector", "Unknown")
+    raw_industry = financials.get("industry", "Unknown")
 
-    # Map yfinance sector names → our categories
+    # Fine-grained: map by INDUSTRY first (more specific)
+    INDUSTRY_MAP = {
+        # Consumer Cyclical sub-sectors
+        "Luxury Goods": "Jewelry",
+        "Gold": "Jewelry",
+        "Jewelry": "Jewelry",
+        "Specialty Retail": "Retail",
+        "Department Stores": "Retail",
+        "Apparel Retail": "Retail",
+        "Internet Retail": "Retail",
+        "Home Improvement Retail": "Retail",
+        "Auto Manufacturers": "Auto",
+        "Auto Parts": "Auto",
+        "Auto - Manufacturers": "Auto",
+        "Auto - Parts": "Auto",
+        "Residential Construction": "Realty",
+        "Lodging": "Hospitality",
+        "Restaurants": "Hospitality",
+        "Travel Services": "Hospitality",
+        # Other industries
+        "Drug Manufacturers": "Pharma",
+        "Drug Manufacturers - General": "Pharma",
+        "Drug Manufacturers - Specialty & Generic": "Pharma",
+        "Biotechnology": "Pharma",
+        "Banks - Regional": "Banking",
+        "Banks - Diversified": "Banking",
+        "Insurance": "Financial Services",
+        "Credit Services": "Financial Services",
+        "Capital Markets": "Financial Services",
+        "Software - Application": "IT",
+        "Software - Infrastructure": "IT",
+        "Information Technology Services": "IT",
+        "Semiconductors": "IT",
+        "Cement": "Infra",
+        "Building Materials": "Infra",
+        "Steel": "Metals",
+        "Aluminum": "Metals",
+        "Copper": "Metals",
+        "Oil & Gas E&P": "Energy",
+        "Oil & Gas Integrated": "Energy",
+        "Oil & Gas Refining & Marketing": "Energy",
+        "Packaged Foods": "FMCG",
+        "Household & Personal Products": "FMCG",
+        "Beverages - Non-Alcoholic": "FMCG",
+        "Tobacco": "FMCG",
+        "Telecom Services": "Telecom",
+    }
+
+    # Broad fallback: map by SECTOR
     SECTOR_MAP = {
         "Technology": "IT",
         "Information Technology": "IT",
@@ -174,7 +223,9 @@ def benchmark_against_peers(ticker: str, financials: dict, peers_csv_path: str =
         "Real Estate": "Realty",
         "Utilities": "Energy",
     }
-    sector = SECTOR_MAP.get(raw_sector, raw_sector)
+
+    # Priority: industry-specific → broad sector → raw value
+    sector = INDUSTRY_MAP.get(raw_industry, SECTOR_MAP.get(raw_sector, raw_sector))
 
     # ── Industry-specific norms ────────────────────────────────────────
     # Format: { sector: { metric: (normal_low, normal_high, description) } }
@@ -244,6 +295,24 @@ def benchmark_against_peers(ticker: str, financials: dict, peers_csv_path: str =
             "profit_margin": (5, 25, "Location and cycle dependent"),
             "cash_conversion": (10, 100, "Lumpy project completions"),
             "roa": (1, 10, "Large land banks on balance sheet"),
+        },
+        "Jewelry": {
+            "debt_to_equity": (0, 1.5, "Jewelry companies should be moderately leveraged"),
+            "profit_margin": (5, 20, "Margins depend on gold/diamond prices and brand"),
+            "cash_conversion": (30, 120, "Inventory-heavy — moderate cash conversion"),
+            "roa": (3, 15, "Significant inventory on balance sheet"),
+        },
+        "Retail": {
+            "debt_to_equity": (0, 1.5, "Retail should be moderately leveraged"),
+            "profit_margin": (2, 12, "Retail margins are thin by nature"),
+            "cash_conversion": (40, 130, "Working capital management is key"),
+            "roa": (3, 15, "Store assets and inventory on balance sheet"),
+        },
+        "Hospitality": {
+            "debt_to_equity": (0.3, 2.5, "Hotel/travel companies carry property debt"),
+            "profit_margin": (5, 20, "Seasonal and cyclical"),
+            "cash_conversion": (40, 130, "Operating leverage matters"),
+            "roa": (2, 12, "Property-heavy balance sheets"),
         },
     }
 
