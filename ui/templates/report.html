@@ -458,6 +458,95 @@
             </div>
             {% endif %}
 
+            <!-- ★ MD&A vs Auditor Tone Mismatch Section -->
+            {% if tone_mismatch and tone_mismatch.years %}
+            <div class="col-span-12 bento p-6 fade-up fade-up-2" style="background: linear-gradient(135deg, rgba(139,92,246,0.04) 0%, rgba(239,68,68,0.04) 100%);">
+                <div class="flex items-center justify-between mb-1">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined text-purple-600 mi">compare_arrows</span>
+                        <h3 class="font-headline text-base font-bold text-primary">Management vs Auditor Tone</h3>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        {% if tone_mismatch.mismatch_count > 0 %}
+                        <span class="text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded bg-red-100 text-red-700 border border-red-200">🔴 {{ tone_mismatch.mismatch_count }} Mismatch{{ 'es' if tone_mismatch.mismatch_count > 1 }}</span>
+                        {% else %}
+                        <span class="text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded bg-green-100 text-green-700 border border-green-200">✓ Aligned</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <p class="text-[11px] text-on-surface-variant mb-4">Comparing management optimism (MD&A) vs auditor caution — large gaps signal potential manipulation</p>
+
+                <div class="grid grid-cols-12 gap-4">
+                    <!-- Summary stats -->
+                    <div class="col-span-12 md:col-span-3 flex flex-col gap-3">
+                        <div class="bento p-3 text-center">
+                            <span class="block text-2xl font-headline font-extrabold {{ 'text-danger' if tone_mismatch.avg_gap >= 20 else ('text-warning' if tone_mismatch.avg_gap >= 10 else 'text-success') }}">{{ tone_mismatch.avg_gap }}pts</span>
+                            <span class="block text-[9px] text-on-surface-variant uppercase tracking-wider font-bold">Avg Gap</span>
+                        </div>
+                        <div class="bento p-3 text-center">
+                            <span class="block text-2xl font-headline font-extrabold {{ 'text-danger' if tone_mismatch.mismatch_count > 2 else ('text-warning' if tone_mismatch.mismatch_count > 0 else 'text-success') }}">{{ tone_mismatch.mismatch_count }}</span>
+                            <span class="block text-[9px] text-on-surface-variant uppercase tracking-wider font-bold">Mismatches</span>
+                        </div>
+                        <div class="flex items-center gap-2 text-[10px]">
+                            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-500 inline-block"></span> Auditor</span>
+                            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-purple-500 inline-block"></span> Management</span>
+                        </div>
+                    </div>
+                    <!-- Chart -->
+                    <div class="col-span-12 md:col-span-9">
+                        <div class="chart-container">
+                            <canvas id="chartMismatch"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Year-by-year mismatch cards -->
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 mt-4">
+                    {% for yr in tone_mismatch.years %}
+                    <div class="p-3 rounded-xl border text-center transition-all hover:shadow-md
+                        {{ 'bg-red-50 border-red-200' if yr.mismatch_level in ['CRITICAL','HIGH'] else ('bg-amber-50 border-amber-200' if yr.mismatch_level == 'MODERATE' else 'bg-green-50 border-green-200') }}">
+                        <span class="block text-xs font-mono text-outline">FY{{ yr.year }}</span>
+                        <div class="flex items-center justify-center gap-1 mt-1">
+                            <span class="text-sm font-bold text-blue-600">{{ yr.auditor_score }}</span>
+                            <span class="text-[9px] text-outline">vs</span>
+                            <span class="text-sm font-bold text-purple-600">{{ yr.mgmt_score }}</span>
+                        </div>
+                        <div class="w-full bg-gray-200 h-1 rounded-full mt-1.5 overflow-hidden">
+                            <div class="h-full rounded-full {{ 'bg-red-500' if yr.gap >= 30 else ('bg-amber-500' if yr.gap >= 15 else ('bg-yellow-400' if yr.gap >= 5 else 'bg-green-500')) }}"
+                                 style="width: {{ [yr.gap|abs, 100]|min }}%"></div>
+                        </div>
+                        <span class="block text-[8px] font-bold uppercase mt-1
+                            {{ 'text-red-700' if yr.mismatch_level in ['CRITICAL','HIGH'] else ('text-amber-700' if yr.mismatch_level == 'MODERATE' else 'text-green-700') }}">{{ yr.mismatch_level }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- ★ CHART: Related Party Transaction Growth -->
+            <div class="col-span-12 lg:col-span-6 bento p-6 fade-up fade-up-2">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="material-symbols-outlined text-warning mi">hub</span>
+                    <h3 class="font-headline text-base font-bold text-primary">Related Party Transactions</h3>
+                </div>
+                <p class="text-[11px] text-on-surface-variant mb-4">Year-wise presence of related party flags — spikes indicate governance risk</p>
+                <div class="chart-container">
+                    <canvas id="chartRPT"></canvas>
+                </div>
+            </div>
+
+            <!-- ★ CHART: Anomaly Deviation Map -->
+            <div class="col-span-12 lg:col-span-6 bento p-6 fade-up fade-up-2">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="material-symbols-outlined text-danger mi">ssid_chart</span>
+                    <h3 class="font-headline text-base font-bold text-primary">Anomaly Deviation Map</h3>
+                </div>
+                <p class="text-[11px] text-on-surface-variant mb-4">YoY % change in key metrics — large spikes signal potential manipulation</p>
+                <div class="chart-container">
+                    <canvas id="chartAnomaly"></canvas>
+                </div>
+            </div>
+
             <!-- Red Flag Timeline (full width) — Modern Design -->
             <div class="col-span-12 bento p-6 fade-up fade-up-3">
                 <div class="flex items-center justify-between mb-1">
@@ -871,6 +960,180 @@ function initRiskCharts() {
                         min: 0, max: 100,
                         grid: { color: 'rgba(196,198,205,0.15)' },
                         ticks: { stepSize: 20 }
+                    },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    // CHART 6: Related Party Transaction Growth (bar)
+    const c6 = document.getElementById('chartRPT');
+    if (c6 && chartData.rptYears && chartData.rptYears.length > 0) {
+        destroyChart('rpt');
+        chartInstances['rpt'] = new Chart(c6, {
+            type: 'bar',
+            data: {
+                labels: chartData.rptYears.map(y => 'FY' + y),
+                datasets: [{
+                    label: 'Related Party Flag',
+                    data: chartData.rptScores,
+                    backgroundColor: chartData.rptScores.map(v => v === 1 ? 'rgba(220,38,38,0.7)' : 'rgba(22,163,74,0.3)'),
+                    borderColor: chartData.rptScores.map(v => v === 1 ? '#dc2626' : '#16a34a'),
+                    borderWidth: 1.5,
+                    borderRadius: 6,
+                }]
+            },
+            options: {
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: ctx => ctx.parsed.y === 1 ? '⚠️ Related party transactions detected' : '✓ No related party flag'
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        min: 0, max: 1.2,
+                        grid: { color: 'rgba(196,198,205,0.15)' },
+                        ticks: {
+                            stepSize: 1,
+                            callback: v => v === 0 ? 'Clean' : v === 1 ? 'Flagged' : ''
+                        }
+                    },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    // CHART 7: Anomaly Deviation Map (multi-line)
+    const c7 = document.getElementById('chartAnomaly');
+    if (c7 && chartData.anomalyYears && chartData.anomalyYears.length > 0) {
+        destroyChart('anomaly');
+        chartInstances['anomaly'] = new Chart(c7, {
+            type: 'line',
+            data: {
+                labels: chartData.anomalyYears,
+                datasets: [
+                    {
+                        label: 'Revenue',
+                        data: chartData.anomalyRevenue,
+                        borderColor: '#0453cd',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                    },
+                    {
+                        label: 'Debt',
+                        data: chartData.anomalyDebt,
+                        borderColor: '#dc2626',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                    },
+                    {
+                        label: 'Receivables',
+                        data: chartData.anomalyReceivables,
+                        borderColor: '#d97706',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                    },
+                    {
+                        label: 'Net Income',
+                        data: chartData.anomalyNetIncome,
+                        borderColor: '#16a34a',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                    }
+                ]
+            },
+            options: {
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: ctx => ctx.dataset.label + ': ' + (ctx.parsed.y !== null ? ctx.parsed.y.toFixed(1) + '%' : 'N/A')
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        grid: { color: 'rgba(196,198,205,0.15)' },
+                        ticks: { callback: v => v + '%' },
+                        title: { display: true, text: 'YoY Change %', font: { size: 10 } }
+                    },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    // CHART 8: MD&A vs Auditor Tone Mismatch (grouped bar + gap line)
+    const c8 = document.getElementById('chartMismatch');
+    if (c8 && chartData.mismatchYears && chartData.mismatchYears.length > 0) {
+        destroyChart('mismatch');
+        chartInstances['mismatch'] = new Chart(c8, {
+            type: 'bar',
+            data: {
+                labels: chartData.mismatchYears.map(y => 'FY' + y),
+                datasets: [
+                    {
+                        label: 'Auditor Sentiment',
+                        data: chartData.mismatchAuditor,
+                        backgroundColor: 'rgba(59,130,246,0.6)',
+                        borderColor: '#3b82f6',
+                        borderWidth: 1.5,
+                        borderRadius: 4,
+                    },
+                    {
+                        label: 'Management Optimism',
+                        data: chartData.mismatchMgmt,
+                        backgroundColor: 'rgba(139,92,246,0.6)',
+                        borderColor: '#8b5cf6',
+                        borderWidth: 1.5,
+                        borderRadius: 4,
+                    },
+                    {
+                        label: 'Gap (Mgmt − Auditor)',
+                        data: chartData.mismatchGaps,
+                        type: 'line',
+                        borderColor: '#dc2626',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2.5,
+                        pointBackgroundColor: chartData.mismatchGaps.map(g => g >= 15 ? '#dc2626' : (g >= 5 ? '#d97706' : '#16a34a')),
+                        pointRadius: 5,
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2,
+                        yAxisID: 'y1',
+                    }
+                ]
+            },
+            options: {
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                if (ctx.dataset.label.includes('Gap')) {
+                                    const g = ctx.parsed.y;
+                                    const level = g >= 30 ? '🔴 CRITICAL' : g >= 15 ? '🟠 HIGH' : g >= 5 ? '🟡 MODERATE' : '🟢 ALIGNED';
+                                    return 'Gap: ' + g + 'pts (' + level + ')';
+                                }
+                                return ctx.dataset.label + ': ' + ctx.parsed.y + '/100';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        min: 0, max: 100,
+                        grid: { color: 'rgba(196,198,205,0.15)' },
+                        ticks: { stepSize: 20 },
+                        title: { display: true, text: 'Score', font: { size: 10 } }
+                    },
+                    y1: {
+                        position: 'right',
+                        grid: { drawOnChartArea: false },
+                        title: { display: true, text: 'Gap', font: { size: 10 } },
+                        ticks: { callback: function(v) { return v + 'pts'; } }
                     },
                     x: { grid: { display: false } }
                 }

@@ -129,6 +129,19 @@ def _run_pipeline(ticker):
         print(f"[app] Auditor sentiment failed: {e}")
         auditor_sentiment = None
 
+    # Step 4b — MD&A (Management) tone analysis
+    mda_sentiment = None
+    tone_mismatch = None
+    try:
+        from analysis.mda_sentiment import analyze_mda_sentiment, compute_mismatch
+        company_name = company_info.get("name", ticker) if company_info else ticker
+        audit_years = [int(str(y)[:4]) for y in financials.get("years", [])]
+        mda_sentiment = analyze_mda_sentiment(ticker, company_name, audit_years)
+        if mda_sentiment and auditor_sentiment:
+            tone_mismatch = compute_mismatch(auditor_sentiment, mda_sentiment)
+    except Exception as e:
+        print(f"[app] MD&A sentiment failed: {e}")
+
     # Step 5 — Risk scoring
     score = score_company(financials, signals, beneish)
 
@@ -146,21 +159,67 @@ def _run_pipeline(ticker):
         ai_report = None
 
     # Pre-serialize chart data to avoid Jinja2 Undefined→tojson crashes
+    years = financials.get("years", []) if financials else []
+    revenue = financials.get("revenue", []) if financials else []
+    net_income = financials.get("net_income", []) if financials else []
+    total_debt = financials.get("total_debt", []) if financials else []
+    receivables = financials.get("receivables", []) if financials else []
+    ocf = financials.get("operating_cash_flow", []) if financials else []
+
+    # Compute YoY growth rates for anomaly deviation map
+    def _yoy(values):
+        result = [None]
+        for i in range(1, len(values)):
+            if values[i] is not None and values[i-1] is not None and values[i-1] != 0:
+                result.append(round((values[i] - values[i-1]) / abs(values[i-1]) * 100, 1))
+            else:
+                result.append(None)
+        return result
+
+    # RPT data — presence score per year (0 = no flag, 1 = flagged)
+    rpt_years = []
+    rpt_scores = []
+    if auditor_sentiment and auditor_sentiment.get("years"):
+        for y in auditor_sentiment["years"]:
+            rpt_years.append(y.get("year"))
+            rpt_scores.append(1 if y.get("related_party_flag") else 0)
+
     chart_data = {
-        "years": financials.get("years", []) if financials else [],
-        "revenue": financials.get("revenue", []) if financials else [],
-        "cashflow": financials.get("operating_cash_flow", []) if financials else [],
-        "debt": financials.get("total_debt", []) if financials else [],
+        "years": years,
+        "revenue": revenue,
+        "cashflow": ocf,
+        "debt": total_debt,
         "mscoreYears": [item.get("year") for item in (beneish_trend or [])],
         "mscoreVals": [item.get("m_score") for item in (beneish_trend or [])],
         "sentYears": [],
         "sentScores": [],
         "peerMetrics": peer_comparison.get("company_metrics", {}) if peer_comparison else {},
         "peerAvgs": peer_comparison.get("peer_averages", {}) if peer_comparison else {},
+        # RPT chart
+        "rptYears": rpt_years,
+        "rptScores": rpt_scores,
+        # Anomaly deviation map
+        "anomalyYears": years[1:] if len(years) > 1 else [],
+        "anomalyRevenue": _yoy(revenue)[1:] if len(revenue) > 1 else [],
+        "anomalyDebt": _yoy(total_debt)[1:] if len(total_debt) > 1 else [],
+        "anomalyReceivables": _yoy(receivables)[1:] if len(receivables) > 1 else [],
+        "anomalyNetIncome": _yoy(net_income)[1:] if len(net_income) > 1 else [],
     }
     if auditor_sentiment and auditor_sentiment.get("years"):
         chart_data["sentYears"] = [y.get("year") for y in auditor_sentiment["years"]]
         chart_data["sentScores"] = [y.get("sentiment_score", 0) for y in auditor_sentiment["years"]]
+
+    # MD&A vs Auditor mismatch chart data
+    if tone_mismatch and tone_mismatch.get("years"):
+        chart_data["mismatchYears"] = [y["year"] for y in tone_mismatch["years"]]
+        chart_data["mismatchAuditor"] = [y["auditor_score"] for y in tone_mismatch["years"]]
+        chart_data["mismatchMgmt"] = [y["mgmt_score"] for y in tone_mismatch["years"]]
+        chart_data["mismatchGaps"] = [y["gap"] for y in tone_mismatch["years"]]
+    else:
+        chart_data["mismatchYears"] = []
+        chart_data["mismatchAuditor"] = []
+        chart_data["mismatchMgmt"] = []
+        chart_data["mismatchGaps"] = []
 
     return {
         "ticker": ticker,
@@ -171,6 +230,8 @@ def _run_pipeline(ticker):
         "signals": signals,
         "signal_summary": signal_summary,
         "auditor_sentiment": auditor_sentiment,
+        "mda_sentiment": mda_sentiment,
+        "tone_mismatch": tone_mismatch,
         "score": score,
         "peer_comparison": peer_comparison,
         "ai_report": ai_report,
