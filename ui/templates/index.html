@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuditGPT — AI Forensic Audit</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="landing-container">
+        <div class="hero">
+            <div class="logo-badge">🔍</div>
+            <h1>Audit<span class="accent">GPT</span></h1>
+            <p class="tagline">The AI That Reads Financial Statements and Finds What the Auditors Missed</p>
+
+            <form action="/analyze" method="POST" class="search-form" id="analyzeForm">
+                <div class="search-wrapper">
+                    <input type="text" name="ticker" placeholder="Enter stock ticker (e.g. TCS, RELIANCE, INFY)" required autocomplete="off" id="tickerInput">
+                    <button type="submit" id="submitBtn">
+                        <span class="btn-text">Analyze</span>
+                        <span class="btn-loader" style="display:none;">⏳ Analyzing...</span>
+                    </button>
+                </div>
+                <p class="hint">NSE-listed companies — ticker will auto-append .NS</p>
+            </form>
+
+            {% if error %}
+            <div class="error-message">
+                ⚠️ {{ error }}
+            </div>
+            {% endif %}
+
+            <div class="features">
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3>20+ Fraud Signals</h3>
+                    <p>Beneish M-Score, Altman Z-Score, revenue-cash flow divergence, and more</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🏢</div>
+                    <h3>Industry Benchmarking</h3>
+                    <p>Z-score comparison against sector peers — context-aware alerts</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🤖</div>
+                    <h3>AI Forensic Report</h3>
+                    <p>Plain-English analysis powered by LLaMA 3 — finds what auditors missed</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('analyzeForm').addEventListener('submit', function() {
+            document.querySelector('.btn-text').style.display = 'none';
+            document.querySelector('.btn-loader').style.display = 'inline';
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('tickerInput').readOnly = true;
+        });
+    </script>
+</body>
+</html>

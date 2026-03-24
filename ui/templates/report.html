@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuditGPT — Report for {{ ticker }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="top-nav">
+        <a href="/" class="nav-logo">🔍 Audit<span class="accent">GPT</span></a>
+        <span class="nav-ticker">{{ company_info.name if company_info else ticker }}</span>
+        <span class="nav-time">Analyzed in {{ elapsed_time }}s</span>
+    </nav>
+
+    <div class="report-container">
+
+        <!-- ── RISK SCORE HERO ── -->
+        <section class="score-hero risk-{{ score.risk_color }}">
+            <div class="score-circle">
+                <span class="score-value">{{ score.overall_score }}</span>
+                <span class="score-label">/ 100</span>
+            </div>
+            <div class="score-info">
+                <h1>{{ score.risk_level }} RISK</h1>
+                <p class="company-name">{{ company_info.name if company_info else ticker }}</p>
+                <p class="company-meta">{{ company_info.sector if company_info else '' }} · {{ company_info.industry if company_info else '' }}</p>
+                <div class="score-breakdown">
+                    <div class="breakdown-item">
+                        <span class="breakdown-label">Signal Score</span>
+                        <div class="breakdown-bar"><div class="breakdown-fill" style="width: {{ (score.breakdown.signal_score / score.breakdown.signal_max * 100)|round }}%"></div></div>
+                        <span class="breakdown-value">{{ score.breakdown.signal_score }}/{{ score.breakdown.signal_max }}</span>
+                    </div>
+                    <div class="breakdown-item">
+                        <span class="breakdown-label">Beneish Score</span>
+                        <div class="breakdown-bar"><div class="breakdown-fill" style="width: {{ (score.breakdown.beneish_score / score.breakdown.beneish_max * 100)|round }}%"></div></div>
+                        <span class="breakdown-value">{{ score.breakdown.beneish_score }}/{{ score.breakdown.beneish_max }}</span>
+                    </div>
+                    <div class="breakdown-item">
+                        <span class="breakdown-label">Trend Score</span>
+                        <div class="breakdown-bar"><div class="breakdown-fill" style="width: {{ (score.breakdown.trend_score / score.breakdown.trend_max * 100)|round }}%"></div></div>
+                        <span class="breakdown-value">{{ score.breakdown.trend_score }}/{{ score.breakdown.trend_max }}</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── AI FORENSIC REPORT ── -->
+        {% if ai_report %}
+        <section class="report-section ai-report-section">
+            <h2>🤖 AI Forensic Report</h2>
+            <div class="ai-report-content">
+                {{ ai_report | safe }}
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- ── SIGNAL SUMMARY ── -->
+        <section class="report-section">
+            <h2>📊 Signal Summary</h2>
+            <div class="signal-stats">
+                <div class="stat-card stat-total">
+                    <span class="stat-number">{{ signal_summary.total }}</span>
+                    <span class="stat-label">Total Red Flags</span>
+                </div>
+                <div class="stat-card stat-high">
+                    <span class="stat-number">{{ signal_summary.high_count }}</span>
+                    <span class="stat-label">High Severity</span>
+                </div>
+                <div class="stat-card stat-medium">
+                    <span class="stat-number">{{ signal_summary.medium_count }}</span>
+                    <span class="stat-label">Medium Severity</span>
+                </div>
+                <div class="stat-card stat-low">
+                    <span class="stat-number">{{ signal_summary.low_count }}</span>
+                    <span class="stat-label">Low Severity</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── BENEISH M-SCORE ── -->
+        <section class="report-section">
+            <h2>🧮 Beneish M-Score</h2>
+            <div class="beneish-card">
+                <div class="mscore-value {% if beneish.is_likely_manipulator %}mscore-danger{% else %}mscore-safe{% endif %}">
+                    {% if beneish.m_score is not none %}
+                        M-Score: {{ beneish.m_score }}
+                    {% else %}
+                        M-Score: N/A
+                    {% endif %}
+                </div>
+                <p class="mscore-interpretation">{{ beneish.interpretation }}</p>
+                
+                {% if beneish.components %}
+                <div class="mscore-components">
+                    <h4>Component Breakdown</h4>
+                    <div class="component-grid">
+                        {% for key, val in beneish.components.items() %}
+                        <div class="component-item">
+                            <span class="comp-name">{{ key }}</span>
+                            <span class="comp-value">{{ val if val is not none else 'N/A' }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            {% if beneish_trend %}
+            <div class="trend-section">
+                <h4>M-Score Trend Over Years</h4>
+                <div class="trend-table">
+                    <table>
+                        <tr>
+                            <th>Year</th>
+                            {% for item in beneish_trend %}
+                            <th>{{ item.year if item.year else 'N/A' }}</th>
+                            {% endfor %}
+                        </tr>
+                        <tr>
+                            <td>M-Score</td>
+                            {% for item in beneish_trend %}
+                            <td class="{% if item.m_score is not none and item.m_score > -1.78 %}danger-cell{% elif item.m_score is not none and item.m_score > -2.22 %}warning-cell{% else %}safe-cell{% endif %}">
+                                {{ item.m_score if item.m_score is not none else 'N/A' }}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        <tr>
+                            <td>Verdict</td>
+                            {% for item in beneish_trend %}
+                            <td>
+                                {% if item.is_likely_manipulator == true %}🔴 Likely{% elif item.is_likely_manipulator == false %}🟢 Unlikely{% else %}—{% endif %}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                    </table>
+                </div>
+            </div>
+            {% endif %}
+        </section>
+
+        <!-- ── RED FLAG TIMELINE ── -->
+        <section class="report-section">
+            <h2>🚩 Red Flag Timeline</h2>
+            {% if signals %}
+            <div class="signals-list">
+                {% for signal in signals %}
+                <div class="signal-card severity-{{ signal.severity }}">
+                    <div class="signal-header">
+                        <span class="signal-severity {{ signal.severity }}">{{ signal.severity|upper }}</span>
+                        <span class="signal-year">{{ signal.year }}</span>
+                    </div>
+                    <h4 class="signal-name">{{ signal.name }}</h4>
+                    <p class="signal-explanation">{{ signal.explanation }}</p>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="no-data">No red flags detected — company appears clean.</p>
+            {% endif %}
+        </section>
+
+        <!-- ── PEER COMPARISON ── -->
+        <section class="report-section">
+            <h2>🏢 Industry Peer Comparison — {{ peer_comparison.sector }}</h2>
+            <div class="peer-info">
+                <p><strong>Sector:</strong> {{ peer_comparison.sector }}</p>
+                <p><strong>Peer Companies:</strong> {{ peer_comparison.peer_tickers | join(', ') }}</p>
+                <p class="peer-note">{{ peer_comparison.note }}</p>
+            </div>
+
+            <div class="metrics-grid">
+                {% for key, val in peer_comparison.company_metrics.items() %}
+                <div class="metric-card">
+                    <span class="metric-name">{{ key | replace('_', ' ') | title }}</span>
+                    <span class="metric-value">{{ val if val is not none else 'N/A' }}{% if val is not none and ('margin' in key or 'roa' in key or 'roe' in key or 'conversion' in key) %}%{% elif val is not none and 'turnover' in key %}x{% endif %}</span>
+                    {% if peer_comparison.peer_averages and key in peer_comparison.peer_averages %}
+                    <span class="metric-norm">Peer Avg: {{ peer_comparison.peer_averages[key] }}{% if 'margin' in key or 'roa' in key or 'roe' in key or 'conversion' in key %}%{% endif %}</span>
+                    {% elif peer_comparison.industry_norms and key in peer_comparison.industry_norms %}
+                    <span class="metric-norm">{{ peer_comparison.sector }} norm: {{ peer_comparison.industry_norms[key].low }} – {{ peer_comparison.industry_norms[key].high }}</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+
+            {% if peer_comparison.peer_data %}
+            <div class="peer-table-wrap">
+                <h4>📊 Peer Breakdown</h4>
+                <table class="peer-table">
+                    <thead>
+                        <tr>
+                            <th>Company</th>
+                            <th>Profit Margin</th>
+                            <th>D/E</th>
+                            <th>ROA</th>
+                            <th>ROE</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="peer-row-target">
+                            <td><strong>{{ peer_comparison.ticker }}</strong> (You)</td>
+                            <td>{{ peer_comparison.company_metrics.profit_margin if peer_comparison.company_metrics.profit_margin is not none else 'N/A' }}%</td>
+                            <td>{{ peer_comparison.company_metrics.debt_to_equity if peer_comparison.company_metrics.debt_to_equity is not none else 'N/A' }}</td>
+                            <td>{{ peer_comparison.company_metrics.roa if peer_comparison.company_metrics.roa is not none else 'N/A' }}%</td>
+                            <td>{{ peer_comparison.company_metrics.roe if peer_comparison.company_metrics.roe is not none else 'N/A' }}%</td>
+                        </tr>
+                        {% for p_ticker, p_vals in peer_comparison.peer_data.items() %}
+                        <tr>
+                            <td>{{ p_ticker | replace('.NS', '') }}</td>
+                            <td>{{ p_vals.profit_margin if p_vals.profit_margin is not none else 'N/A' }}{% if p_vals.profit_margin is not none %}%{% endif %}</td>
+                            <td>{{ p_vals.debt_to_equity if p_vals.debt_to_equity is not none else 'N/A' }}</td>
+                            <td>{{ p_vals.roa if p_vals.roa is not none else 'N/A' }}{% if p_vals.roa is not none %}%{% endif %}</td>
+                            <td>{{ p_vals.roe if p_vals.roe is not none else 'N/A' }}{% if p_vals.roe is not none %}%{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                        {% if peer_comparison.peer_averages %}
+                        <tr class="peer-row-avg">
+                            <td><strong>Peer Average</strong></td>
+                            <td>{{ peer_comparison.peer_averages.get('profit_margin', 'N/A') }}{% if peer_comparison.peer_averages.get('profit_margin') is not none %}%{% endif %}</td>
+                            <td>{{ peer_comparison.peer_averages.get('debt_to_equity', 'N/A') }}</td>
+                            <td>{{ peer_comparison.peer_averages.get('roa', 'N/A') }}{% if peer_comparison.peer_averages.get('roa') is not none %}%{% endif %}</td>
+                            <td>{{ peer_comparison.peer_averages.get('roe', 'N/A') }}{% if peer_comparison.peer_averages.get('roe') is not none %}%{% endif %}</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+
+            {% if peer_comparison.flags %}
+            <div class="peer-flags">
+                <h4>⚠️ Industry-Contextualised Flags</h4>
+                {% for flag in peer_comparison.flags %}
+                <div class="peer-flag severity-{{ flag.severity }}">
+                    <span class="flag-severity-badge {{ flag.severity }}">{{ flag.severity | upper }}</span>
+                    <strong>{{ flag.metric }}:</strong> {{ flag.value }}
+                    {% if flag.peer_avg is defined and flag.peer_avg is not none %}
+                    <span class="flag-range">(Peer Avg: {{ flag.peer_avg }})</span>
+                    {% else %}
+                    <span class="flag-range">({{ peer_comparison.sector }} norm: {{ flag.sector_range }})</span>
+                    {% endif %}
+                    <br><span class="flag-reason">{{ flag.concern }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="peer-flags">
+                <p style="color: var(--success);">✅ All metrics within {{ peer_comparison.sector }} industry norms.</p>
+            </div>
+            {% endif %}
+        </section>
+
+        <!-- ── AUDITOR SENTIMENT TIMELINE ── -->
+        {% if auditor_sentiment and auditor_sentiment.years %}
+        <section class="report-section auditor-section">
+            <h2>🏛️ Auditor Note Sentiment Analysis</h2>
+
+            <!-- Summary stats bar -->
+            <div class="auditor-summary">
+                <div class="auditor-stat">
+                    <span class="auditor-stat-value {% if auditor_sentiment.avg_score and auditor_sentiment.avg_score >= 70 %}text-safe{% elif auditor_sentiment.avg_score and auditor_sentiment.avg_score >= 40 %}text-warning{% else %}text-danger{% endif %}">
+                        {{ auditor_sentiment.avg_score if auditor_sentiment.avg_score else 'N/A' }}
+                    </span>
+                    <span class="auditor-stat-label">Avg Sentiment /100</span>
+                </div>
+                <div class="auditor-stat">
+                    <span class="auditor-stat-value {% if auditor_sentiment.going_concern_count > 0 %}text-danger{% else %}text-safe{% endif %}">
+                        {{ auditor_sentiment.going_concern_count }}
+                    </span>
+                    <span class="auditor-stat-label">Going Concern</span>
+                </div>
+                <div class="auditor-stat">
+                    <span class="auditor-stat-value {% if auditor_sentiment.related_party_count > 0 %}text-warning{% else %}text-safe{% endif %}">
+                        {{ auditor_sentiment.related_party_count }}
+                    </span>
+                    <span class="auditor-stat-label">Related Party Flags</span>
+                </div>
+                <div class="auditor-stat">
+                    <span class="auditor-stat-value {% if auditor_sentiment.auditor_changes > 0 %}text-warning{% else %}text-safe{% endif %}">
+                        {{ auditor_sentiment.auditor_changes }}
+                    </span>
+                    <span class="auditor-stat-label">Auditor Changes</span>
+                </div>
+                <div class="auditor-stat">
+                    <span class="auditor-stat-value {% if auditor_sentiment.qualified_count > 0 %}text-danger{% else %}text-safe{% endif %}">
+                        {{ auditor_sentiment.qualified_count }}
+                    </span>
+                    <span class="auditor-stat-label">Qualified Opinions</span>
+                </div>
+            </div>
+
+            {% if auditor_sentiment.summary %}
+            <p class="auditor-overview">{{ auditor_sentiment.summary }}</p>
+            {% endif %}
+
+            <!-- Year-by-year timeline -->
+            <div class="auditor-timeline">
+                {% for yr in auditor_sentiment.years %}
+                <div class="auditor-year-card">
+                    <div class="auditor-year-header">
+                        <span class="auditor-year-label">FY{{ yr.year }}</span>
+                        <span class="auditor-opinion opinion-{{ yr.opinion_type | lower | replace(' ', '_') }}">
+                            {% if yr.opinion_type == 'UNQUALIFIED' %}✅{% elif yr.opinion_type == 'EMPHASIS_OF_MATTER' %}⚠️{% elif yr.opinion_type == 'QUALIFIED' %}🚩{% elif yr.opinion_type == 'ADVERSE' %}🔴{% else %}❌{% endif %}
+                            {{ yr.opinion_type | replace('_', ' ') }}
+                        </span>
+                    </div>
+
+                    <div class="auditor-year-body">
+                        <div class="auditor-score-row">
+                            <span class="auditor-firm">{{ yr.auditor_name }}</span>
+                            <span class="auditor-score {% if yr.sentiment_score >= 70 %}text-safe{% elif yr.sentiment_score >= 40 %}text-warning{% else %}text-danger{% endif %}">
+                                {{ yr.sentiment_score }}/100
+                            </span>
+                        </div>
+
+                        <div class="auditor-score-bar">
+                            <div class="auditor-score-fill {% if yr.sentiment_score >= 70 %}fill-safe{% elif yr.sentiment_score >= 40 %}fill-warning{% else %}fill-danger{% endif %}" style="width: {{ yr.sentiment_score }}%"></div>
+                        </div>
+
+                        <div class="auditor-tone">
+                            Tone: <span class="tone-badge tone-{{ yr.language_tone | lower }}">{{ yr.language_tone }}</span>
+                            {% if yr.auditor_changed %}<span class="flag-badge flag-change">🔄 Auditor Changed</span>{% endif %}
+                            {% if yr.going_concern %}<span class="flag-badge flag-danger">💀 Going Concern</span>{% endif %}
+                            {% if yr.related_party_flag %}<span class="flag-badge flag-warning">🕸️ Related Party</span>{% endif %}
+                        </div>
+
+                        {% if yr.key_issues %}
+                        <div class="auditor-issues">
+                            {% for issue in yr.key_issues[:3] %}
+                            <div class="auditor-issue">↳ {{ issue }}</div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- ── FINANCIAL DATA SNAPSHOT ── -->
+        <section class="report-section">
+            <h2>📈 Financial Data Snapshot</h2>
+            <div class="fin-table-wrapper">
+                <table class="fin-table">
+                    <tr>
+                        <th>Metric</th>
+                        {% for year in financials.years %}
+                        <th>{{ year }}</th>
+                        {% endfor %}
+                    </tr>
+                    {% for metric_name, metric_key in [('Revenue', 'revenue'), ('Net Income', 'net_income'), ('Operating Cash Flow', 'operating_cash_flow'), ('Total Debt', 'total_debt'), ('Receivables', 'receivables'), ('Total Assets', 'total_assets'), ('Gross Profit', 'gross_profit')] %}
+                    <tr>
+                        <td>{{ metric_name }}</td>
+                        {% for val in financials[metric_key] %}
+                        <td>{% if val is not none %}₹{{ (val / 10000000)|round(0)|int }} Cr{% else %}N/A{% endif %}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+        </section>
+
+        <footer class="report-footer">
+            <p>Generated by <strong>AuditGPT</strong> — AI-Powered Forensic Financial Auditing</p>
+            <p>This report is for educational and research purposes only. Not financial advice.</p>
+        </footer>
+    </div>
+</body>
+</html>

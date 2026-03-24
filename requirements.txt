@@ -1,0 +1,10 @@
+flask
+yfinance
+pandas
+numpy
+groq
+python-dotenv
+requests
+PyPDF2
+transformers
+torch

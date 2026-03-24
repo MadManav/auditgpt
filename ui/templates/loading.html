@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuditGPT — Analyzing...</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container loading-container">
+        <h1>Analyzing {{ ticker }}...</h1>
+
+        <div class="progress-steps">
+            <div class="step" id="step-1">
+                <span class="step-icon">📥</span>
+                <span class="step-text">Fetching financial data...</span>
+            </div>
+            <div class="step" id="step-2">
+                <span class="step-icon">🔍</span>
+                <span class="step-text">Running fraud signal detection...</span>
+            </div>
+            <div class="step" id="step-3">
+                <span class="step-icon">📊</span>
+                <span class="step-text">Benchmarking against industry peers...</span>
+            </div>
+            <div class="step" id="step-4">
+                <span class="step-icon">📝</span>
+                <span class="step-text">Analyzing auditor reports...</span>
+            </div>
+            <div class="step" id="step-5">
+                <span class="step-icon">🤖</span>
+                <span class="step-text">Generating forensic report...</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

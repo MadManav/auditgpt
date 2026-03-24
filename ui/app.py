@@ -1,0 +1,173 @@
+"""
+app.py — Flask Routes & Blueprint (Person 3)
+Handles web routes and orchestrates the full analysis pipeline.
+"""
+
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for
+import time
+import traceback
+import csv
+import os
+
+bp = Blueprint('main', __name__)
+
+# ── Load NSE ticker list at startup ──
+_TICKER_MAP = {}  # { "SYMBOL": "Company Name", ... }
+_NAME_MAP = {}    # { "company name lower": "SYMBOL", ... }
+
+def _load_ticker_list():
+    csv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "EQUITY_L.csv")
+    if not os.path.exists(csv_path):
+        return
+    with open(csv_path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            symbol = row.get("SYMBOL", "").strip()
+            name = row.get("NAME OF COMPANY", "").strip()
+            if symbol and name:
+                _TICKER_MAP[symbol.upper()] = name
+                _NAME_MAP[name.lower()] = symbol.upper()
+
+_load_ticker_list()
+
+
+def _resolve_ticker(user_input: str) -> str:
+    """
+    Resolve user input to an NSE ticker.
+    1. If it's already a valid symbol → use it
+    2. If it matches a company name (fuzzy) → return the symbol
+    3. Otherwise → return input as-is
+    """
+    clean = user_input.strip().upper().replace(" ", "")
+
+    # Direct ticker match (e.g. "TCS", "RELIANCE")
+    if clean in _TICKER_MAP:
+        return clean
+
+    # Fuzzy match against company names
+    query = user_input.strip().lower()
+    
+    # Exact name match
+    if query in _NAME_MAP:
+        return _NAME_MAP[query]
+
+    # Partial match — find best match
+    best_match = None
+    best_score = 0
+    for name_lower, symbol in _NAME_MAP.items():
+        # Check if all query words appear in the company name
+        query_words = query.split()
+        matches = sum(1 for w in query_words if w in name_lower)
+        score = matches / len(query_words) if query_words else 0
+        
+        if score > best_score and score >= 0.5:
+            best_score = score
+            best_match = symbol
+
+    if best_match:
+        return best_match
+
+    # Fallback: return cleaned input
+    return clean
+
+
+def _run_pipeline(ticker):
+    """
+    Run the full forensic analysis pipeline.
+    Returns dict with all results or raises an exception.
+    """
+    from data.fetcher import fetch_financials, get_company_info
+    from analysis.beneish import calculate_beneish_mscore, calculate_beneish_trend
+    from analysis.signals import detect_fraud_signals, get_signal_summary
+    from analysis.scorer import score_company, benchmark_against_peers
+
+    # Step 1 — Fetch financial data
+    financials = fetch_financials(ticker)
+    if financials is None:
+        raise ValueError(f"Could not fetch financial data for '{ticker}'. Check if the ticker is valid (e.g., TCS.NS, RELIANCE.NS).")
+
+    company_info = get_company_info(ticker)
+
+    # Step 2 — Beneish M-Score
+    beneish = calculate_beneish_mscore(financials)
+    beneish_trend = calculate_beneish_trend(financials)
+
+    # Step 3 — Fraud signal detection
+    signals = detect_fraud_signals(financials)
+    signal_summary = get_signal_summary(signals)
+
+    # Step 4 — Auditor sentiment analysis (Gemini)
+    try:
+        from analysis.auditor_sentiment import analyze_auditor_sentiment
+        company_name = company_info.get("name", ticker) if company_info else ticker
+        audit_years = [int(str(y)[:4]) for y in financials.get("years", [])]
+        auditor_sentiment = analyze_auditor_sentiment(ticker, company_name, audit_years)
+    except Exception:
+        auditor_sentiment = None
+
+    # Step 5 — Risk scoring
+    score = score_company(financials, signals, beneish)
+
+    # Step 6 — Peer benchmarking
+    peer_comparison = benchmark_against_peers(ticker, financials)
+
+    # Step 7 — LLM forensic report (Gemini)
+    try:
+        from ui.llm import generate_forensic_report
+        ai_report = generate_forensic_report(
+            ticker, company_info, financials, beneish,
+            signals, signal_summary, score, peer_comparison
+        )
+    except Exception:
+        ai_report = None
+
+    return {
+        "ticker": ticker,
+        "company_info": company_info,
+        "financials": financials,
+        "beneish": beneish,
+        "beneish_trend": beneish_trend,
+        "signals": signals,
+        "signal_summary": signal_summary,
+        "auditor_sentiment": auditor_sentiment,
+        "score": score,
+        "peer_comparison": peer_comparison,
+        "ai_report": ai_report,
+    }
+
+
+@bp.route('/')
+def index():
+    """Landing page with ticker search bar."""
+    return render_template('index.html')
+
+
+@bp.route('/analyze', methods=['POST'])
+def analyze():
+    """
+    Run the full 5-step forensic analysis pipeline and render report.
+    """
+    raw_input = request.form.get('ticker', '').strip()
+    if not raw_input:
+        return render_template('index.html', error="Please enter a stock ticker or company name.")
+
+    # Resolve company name to ticker symbol
+    ticker = _resolve_ticker(raw_input)
+
+    # Add .NS suffix if not present (assume NSE)
+    if '.' not in ticker:
+        ticker = ticker + '.NS'
+
+    try:
+        start_time = time.time()
+        results = _run_pipeline(ticker)
+        elapsed = round(time.time() - start_time, 1)
+        results['elapsed_time'] = elapsed
+
+        return render_template('report.html', **results)
+
+    except ValueError as e:
+        return render_template('index.html', error=str(e))
+    except Exception as e:
+        traceback.print_exc()
+        return render_template('index.html', error=f"Analysis failed: {str(e)}")
