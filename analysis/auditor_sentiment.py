@@ -14,12 +14,19 @@ genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 
 def _clean_json(raw: str) -> str:
-    """Clean Gemini's response to get valid JSON."""
+    """Robustly clean Gemini's response to get valid JSON."""
     raw = re.sub(r'^```json\s*', '', raw.strip())
     raw = re.sub(r'^```\s*', '', raw)
     raw = re.sub(r'\s*```$', '', raw)
     raw = re.sub(r',\s*}', '}', raw)
     raw = re.sub(r',\s*]', ']', raw)
+    # Replace smart/curly quotes
+    raw = raw.replace('\u2018', "'").replace('\u2019', "'")
+    raw = raw.replace('\u201c', '"').replace('\u201d', '"')
+    # Remove control characters
+    raw = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', raw)
+    # Fix apostrophes in JSON string values (company's → companys)
+    raw = re.sub(r"(?<=\w)'(?=\w)", '', raw)
     return raw.strip()
 
 
@@ -79,9 +86,21 @@ Rules:
             )
         )
 
-        response = model.generate_content(prompt)
-        cleaned = _clean_json(response.text)
-        data = json.loads(cleaned)
+        MAX_RETRIES = 2
+        data = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = model.generate_content(prompt)
+                cleaned = _clean_json(response.text)
+                data = json.loads(cleaned)
+                break  # Success
+            except json.JSONDecodeError as je:
+                print(f"[auditor_sentiment] JSON parse error (attempt {attempt + 1}/{MAX_RETRIES}): {je}")
+                if attempt >= MAX_RETRIES - 1:
+                    raise  # Re-raise on final attempt
+
+        if data is None:
+            raise ValueError("Failed to parse Gemini response after retries")
 
         # Process and enrich
         year_data = data.get("years", [])

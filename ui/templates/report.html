@@ -85,7 +85,7 @@
             <div class="beneish-card">
                 <div class="mscore-value {% if beneish.is_likely_manipulator %}mscore-danger{% else %}mscore-safe{% endif %}">
                     {% if beneish.m_score is not none %}
-                        M-Score: {{ beneish.m_score }}
+                        M-Score: {{ beneish.m_score | round(4) }}
                     {% else %}
                         M-Score: N/A
                     {% endif %}
@@ -99,7 +99,7 @@
                         {% for key, val in beneish.components.items() %}
                         <div class="component-item">
                             <span class="comp-name">{{ key }}</span>
-                            <span class="comp-value">{{ val if val is not none else 'N/A' }}</span>
+                            <span class="comp-value">{{ val | round(4) if val is not none else 'N/A' }}</span>
                         </div>
                         {% endfor %}
                     </div>
@@ -122,7 +122,7 @@
                             <td>M-Score</td>
                             {% for item in beneish_trend %}
                             <td class="{% if item.m_score is not none and item.m_score > -1.78 %}danger-cell{% elif item.m_score is not none and item.m_score > -2.22 %}warning-cell{% else %}safe-cell{% endif %}">
-                                {{ item.m_score if item.m_score is not none else 'N/A' }}
+                                {{ item.m_score | round(4) if item.m_score is not none else 'N/A' }}
                             </td>
                             {% endfor %}
                         </tr>
@@ -255,6 +255,15 @@
         {% if auditor_sentiment and auditor_sentiment.years %}
         <section class="report-section auditor-section">
             <h2>🏛️ Auditor Note Sentiment Analysis</h2>
+            {% if auditor_sentiment.has_pdfs %}
+            <div class="source-indicator source-pdf">
+                📄 Source: Real Annual Report PDFs ({{ auditor_sentiment.source_summary }})
+            </div>
+            {% else %}
+            <div class="source-indicator source-ai">
+                🤖 Source: AI analysis from public financial knowledge
+            </div>
+            {% endif %}
 
             <!-- Summary stats bar -->
             <div class="auditor-summary">
@@ -299,7 +308,9 @@
                 {% for yr in auditor_sentiment.years %}
                 <div class="auditor-year-card">
                     <div class="auditor-year-header">
-                        <span class="auditor-year-label">FY{{ yr.year }}</span>
+                        <span class="auditor-year-label">FY{{ yr.year }}
+                            {% if yr.source == 'PDF' %}<span class="source-badge badge-pdf">📄 PDF</span>{% elif yr.source == 'AI_MEMORY' %}<span class="source-badge badge-ai">🤖 AI</span>{% endif %}
+                        </span>
                         <span class="auditor-opinion opinion-{{ yr.opinion_type | lower | replace(' ', '_') }}">
                             {% if yr.opinion_type == 'UNQUALIFIED' %}✅{% elif yr.opinion_type == 'EMPHASIS_OF_MATTER' %}⚠️{% elif yr.opinion_type == 'QUALIFIED' %}🚩{% elif yr.opinion_type == 'ADVERSE' %}🔴{% else %}❌{% endif %}
                             {{ yr.opinion_type | replace('_', ' ') }}
@@ -329,6 +340,29 @@
                         <div class="auditor-issues">
                             {% for issue in yr.key_issues[:3] %}
                             <div class="auditor-issue">↳ {{ issue }}</div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        {% if yr.page_references %}
+                        <div class="auditor-pages">
+                            📑 Pages:
+                            {% if yr.page_references.auditor_report and yr.page_references.auditor_report != 'Not found' %}
+                            <span class="page-ref">Audit Report: p.{{ yr.page_references.auditor_report }}</span>
+                            {% endif %}
+                            {% if yr.page_references.key_audit_matters and yr.page_references.key_audit_matters != 'Not found' %}
+                            <span class="page-ref">KAM: p.{{ yr.page_references.key_audit_matters }}</span>
+                            {% endif %}
+                            {% if yr.page_references.related_party and yr.page_references.related_party != 'Not found' %}
+                            <span class="page-ref">Related Party: p.{{ yr.page_references.related_party }}</span>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+
+                        {% if yr.notable_findings %}
+                        <div class="auditor-findings">
+                            {% for finding in yr.notable_findings[:3] %}
+                            <div class="auditor-finding">📌 {{ finding }}</div>
                             {% endfor %}
                         </div>
                         {% endif %}

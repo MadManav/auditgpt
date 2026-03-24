@@ -96,13 +96,32 @@ def _run_pipeline(ticker):
     signals = detect_fraud_signals(financials)
     signal_summary = get_signal_summary(signals)
 
-    # Step 4 — Auditor sentiment analysis (Gemini)
+    # Step 4 — Auditor sentiment analysis (Gemini memory-based)
     try:
         from analysis.auditor_sentiment import analyze_auditor_sentiment
         company_name = company_info.get("name", ticker) if company_info else ticker
         audit_years = [int(str(y)[:4]) for y in financials.get("years", [])]
         auditor_sentiment = analyze_auditor_sentiment(ticker, company_name, audit_years)
-    except Exception:
+        auditor_sentiment["has_pdfs"] = False
+        # If returned empty years (API error), create placeholders
+        if not auditor_sentiment.get("years"):
+            print(f"[app] Auditor analysis returned empty — creating placeholders")
+            auditor_sentiment["years"] = [
+                {
+                    "year": yr, "source": "UNAVAILABLE", "sentiment_score": 50,
+                    "opinion_type": "UNKNOWN", "auditor_name": "Data unavailable",
+                    "auditor_changed": False, "going_concern": False,
+                    "related_party_flag": False, "language_tone": "UNKNOWN",
+                    "key_issues": ["API error — retry later"], "confidence": "NONE",
+                } for yr in audit_years[-5:]
+            ]
+            auditor_sentiment["total_years"] = len(auditor_sentiment["years"])
+            auditor_sentiment["avg_score"] = 50
+        else:
+            for y in auditor_sentiment["years"]:
+                y["source"] = y.get("source", "AI_MEMORY")
+    except Exception as e:
+        print(f"[app] Auditor sentiment failed: {e}")
         auditor_sentiment = None
 
     # Step 5 — Risk scoring

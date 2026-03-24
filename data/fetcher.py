@@ -54,23 +54,154 @@ def _pad_or_trim(values, target_len, fill=None):
 
 def fetch_financials(ticker: str, years: int = 10) -> dict:
     """
-    Fetch financial statements from yfinance and normalize into
-    the dict format expected by analysis modules.
+    Fetch financial statements — tries Screener.in first (10+ years),
+    falls back to yfinance (~4 years) if Screener fails.
 
     Args:
         ticker: Stock ticker (e.g., 'TCS.NS', 'RELIANCE.NS')
-        years: Number of years of data to fetch (max ~4 from yfinance annual)
+        years: Number of years of data to fetch
 
     Returns:
         dict with yearly financial data lists (index 0 = oldest)
         or None if the ticker is invalid / data unavailable
     """
+    # ── Step 1: Try Screener.in for 10+ years ──
+    from data.screener import fetch_from_screener, ticker_to_slug
+    slug = ticker_to_slug(ticker)
+    screener_data = None
+    try:
+        screener_data = fetch_from_screener(slug)
+    except Exception as e:
+        print(f"[fetcher] Screener failed: {e}")
+
+    # ── Step 2: Get metadata from yfinance (sector, company name) ──
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info or {}
+        company_name = info.get("longName", info.get("shortName", ticker))
+        sector = info.get("sector", "Unknown")
+        industry = info.get("industry", "Unknown")
+    except Exception:
+        company_name = ticker
+        sector = "Unknown"
+        industry = "Unknown"
+
+    # ── Step 3: If Screener worked, merge with yfinance detail fields ──
+    if screener_data and len(screener_data.get("years", [])) >= 4:
+        screener_data["ticker"] = ticker
+        screener_data["company_name"] = company_name
+        screener_data["sector"] = sector
+        screener_data["industry"] = industry
+
+        # Fetch yfinance statements for fields Screener doesn't have
+        try:
+            balance_sheet = stock.balance_sheet
+            income_stmt = stock.income_stmt
+
+            if balance_sheet is not None and not balance_sheet.empty:
+                yf_years = [col.year for col in balance_sheet.columns]
+                yf_years.reverse()  # oldest first
+
+                # Extract yfinance-only fields
+                yf_receivables = _extract_yearly_values(balance_sheet, [
+                    "Receivables", "Accounts Receivable", "Net Receivables"
+                ])
+                yf_inventory = _extract_yearly_values(balance_sheet, [
+                    "Inventory", "Raw Materials", "Finished Goods"
+                ])
+                yf_current_assets = _extract_yearly_values(balance_sheet, [
+                    "Current Assets"
+                ])
+                yf_current_liabilities = _extract_yearly_values(balance_sheet, [
+                    "Current Liabilities"
+                ])
+
+                yf_sga = []
+                if income_stmt is not None and not income_stmt.empty:
+                    yf_sga = _extract_yearly_values(income_stmt, [
+                        "Selling General And Administration",
+                        "Selling And Marketing Expense",
+                        "General And Administrative Expense"
+                    ])
+                    yf_cogs = _extract_yearly_values(income_stmt, [
+                        "Cost Of Revenue", "Cost of Goods Sold"
+                    ])
+                    yf_gross_profit = _extract_yearly_values(income_stmt, [
+                        "Gross Profit"
+                    ])
+                else:
+                    yf_cogs = []
+                    yf_gross_profit = []
+
+                # Map yfinance data onto Screener's year timeline
+                screener_years = screener_data["years"]
+                n = len(screener_years)
+
+                def _map_yf_to_screener(yf_vals, yf_yrs, screener_yrs, existing=None):
+                    """Map yfinance values to screener's year positions.
+                    Keeps existing screener values for years yfinance doesn't cover."""
+                    result = list(existing) if existing else [None] * len(screener_yrs)
+                    yf_map = dict(zip(yf_yrs, yf_vals))
+                    for i, yr in enumerate(screener_yrs):
+                        if yr in yf_map and yf_map[yr] is not None:
+                            result[i] = yf_map[yr]
+                    return result
+
+                # Override Screener's estimated fields with accurate yfinance data
+                # For fields Screener estimates poorly, pass existing values as base
+                if yf_receivables:
+                    screener_data["receivables"] = _map_yf_to_screener(
+                        yf_receivables, yf_years, screener_years,
+                        existing=screener_data.get("receivables"))
+                if yf_inventory:
+                    screener_data["inventory"] = _map_yf_to_screener(
+                        yf_inventory, yf_years, screener_years,
+                        existing=screener_data.get("inventory"))
+                if yf_current_assets:
+                    screener_data["current_assets"] = _map_yf_to_screener(
+                        yf_current_assets, yf_years, screener_years,
+                        existing=screener_data.get("current_assets"))
+                if yf_current_liabilities:
+                    screener_data["current_liabilities"] = _map_yf_to_screener(
+                        yf_current_liabilities, yf_years, screener_years,
+                        existing=screener_data.get("current_liabilities"))
+                if yf_sga:
+                    screener_data["sga"] = _map_yf_to_screener(
+                        yf_sga, yf_years, screener_years,
+                        existing=screener_data.get("sga"))
+                if yf_cogs:
+                    screener_data["cost_of_goods"] = _map_yf_to_screener(
+                        yf_cogs, yf_years, screener_years,
+                        existing=screener_data.get("cost_of_goods"))
+                if yf_gross_profit:
+                    screener_data["gross_profit"] = _map_yf_to_screener(
+                        yf_gross_profit, yf_years, screener_years,
+                        existing=screener_data.get("gross_profit"))
+
+                # Recompute working capital with accurate data
+                wc = []
+                for i in range(n):
+                    ca = screener_data["current_assets"][i] if i < len(screener_data["current_assets"]) else None
+                    cl = screener_data["current_liabilities"][i] if i < len(screener_data["current_liabilities"]) else None
+                    wc.append(ca - cl if ca is not None and cl is not None else None)
+                screener_data["working_capital"] = wc
+
+                print(f"[fetcher] Merged yfinance detail fields ({len(yf_years)} years) into Screener data")
+
+        except Exception as e:
+            print(f"[fetcher] yfinance merge skipped: {e}")
+
+        print(f"[fetcher] Using Screener.in data: {len(screener_data['years'])} years")
+        return screener_data
+
+    # ── Step 4: Fallback to yfinance ──
+    print(f"[fetcher] Falling back to yfinance for {ticker}")
     try:
         stock = yf.Ticker(ticker)
         info = stock.info or {}
 
         # Pull financial statements (yfinance gives up to ~4 years annual)
-        income_stmt = stock.income_stmt  # columns = dates, rows = items
+        income_stmt = stock.income_stmt
         balance_sheet = stock.balance_sheet
         cashflow = stock.cashflow
 

@@ -150,12 +150,31 @@ def calculate_beneish_mscore(financials: dict, year_idx: int = -1) -> dict:
     if year_idx < 0:
         year_idx = n + year_idx
 
+    # Walk backward to find the latest year with complete data for Beneish
+    # (needs gross_profit, receivables, SGA to not be None for both year and year-1)
+    critical_fields = ["gross_profit", "receivables", "cost_of_goods"]
+    best_idx = year_idx
+    while best_idx >= 1:
+        has_data = True
+        for field in critical_fields:
+            vals = financials.get(field, [])
+            if best_idx >= len(vals) or best_idx - 1 >= len(vals):
+                has_data = False
+                break
+            if vals[best_idx] is None or vals[best_idx - 1] is None:
+                has_data = False
+                break
+        if has_data:
+            break
+        best_idx -= 1
+    year_idx = best_idx
+
     if year_idx < 1:
         return {
             "m_score": None,
             "components": {},
             "is_likely_manipulator": None,
-            "interpretation": "Insufficient data — need at least 2 years."
+            "interpretation": "Insufficient data — need at least 2 years with complete data."
         }
 
     # Calculate all 8 components
