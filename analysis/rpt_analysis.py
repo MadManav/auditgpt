@@ -95,7 +95,11 @@ Rules:
         data = None
         for attempt in range(MAX_RETRIES):
             try:
-                response = model.generate_content(prompt)
+                from google.api_core.retry import Retry
+                response = model.generate_content(
+                    prompt, 
+                    request_options={"retry": None, "timeout": 10}
+                )
                 cleaned = _clean_json(response.text)
                 data = json.loads(cleaned)
                 break
@@ -103,6 +107,12 @@ Rules:
                 print(f"[rpt_analysis] JSON parse error (attempt {attempt + 1}/{MAX_RETRIES}): {je}")
                 if attempt >= MAX_RETRIES - 1:
                     raise
+            except Exception as api_err:
+                msg = str(api_err).lower()
+                if any(k in msg for k in ("quota", "resource_exhausted", "resourceexhausted", "429", "rate limit", "per day")):
+                    print(f"[rpt_analysis] Quota exceeded — skipping Gemini call.")
+                    raise
+                raise
 
         if data is None:
             raise ValueError("Failed to parse Gemini RPT response after retries")

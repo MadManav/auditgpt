@@ -1,9 +1,10 @@
 """
 llm.py — LLM-Powered Forensic Report Generation
-Uses Google Gemini to generate plain-English forensic audit reports.
+Uses Google Gemini to generate structured JSON forensic audit reports.
 """
 
 import os
+import json
 import google.generativeai as genai
 from dotenv import load_dotenv
 
@@ -28,11 +29,11 @@ def _build_prompt(ticker, company_info, financials, beneish, signals, signal_sum
 
     fin_table = "Year | Revenue (Cr) | Net Income (Cr) | OCF (Cr) | Debt (Cr)\n"
     for i, yr in enumerate(years):
-        r = f"{revenue[i]/1e7:,.0f}" if revenue[i] else "N/A"
-        n = f"{net_income[i]/1e7:,.0f}" if net_income[i] else "N/A"
-        o = f"{ocf[i]/1e7:,.0f}" if ocf[i] else "N/A"
-        d = f"{debt[i]/1e7:,.0f}" if debt[i] else "N/A"
-        fin_table += f"{yr} | ₹{r} | ₹{n} | ₹{o} | ₹{d}\n"
+        r = f"{revenue[i]/1e7:,.0f}" if i < len(revenue) and revenue[i] else "N/A"
+        n = f"{net_income[i]/1e7:,.0f}" if i < len(net_income) and net_income[i] else "N/A"
+        o = f"{ocf[i]/1e7:,.0f}" if i < len(ocf) and ocf[i] else "N/A"
+        d = f"{debt[i]/1e7:,.0f}" if i < len(debt) and debt[i] else "N/A"
+        fin_table += f"{yr} | Rs.{r} | Rs.{n} | Rs.{o} | Rs.{d}\n"
 
     # Format signals
     top_signals = ""
@@ -52,7 +53,7 @@ def _build_prompt(ticker, company_info, financials, beneish, signals, signal_sum
         for k, v in peer_comparison["company_metrics"].items():
             peer_metrics += f"- {k.replace('_', ' ').title()}: {v}\n"
 
-    prompt = f"""You are a forensic financial auditor AI. Analyze the following company data and generate a professional forensic audit report.
+    prompt = f"""You are a senior forensic accountant. Analyze {company_name} ({ticker}).
 
 COMPANY: {company_name} ({ticker})
 SECTOR: {sector}
@@ -71,37 +72,63 @@ FRAUD SIGNALS DETECTED ({signal_summary['total']} total - {signal_summary['high_
 KEY RATIOS:
 {peer_metrics}
 
-Generate a forensic audit report with these sections (use ## markdown headings exactly as shown):
-## Executive Summary
-(2-3 lines — overall verdict)
-## Key Findings
-(bullet points — what stands out, both positive and negative)
-## Risk Areas
-(specific concerns with data backing)
-## Positive Indicators
-(what looks healthy)
-## Recommendation
-(1-2 lines — what an investor/auditor should do next)
+OUTPUT FORMAT: Return ONLY a valid JSON object with this exact structure:
+{{
+  "summary_paragraph": "<A single comprehensive paragraph following the template below>",
+  "pointwise_report": [
+    {{ "title": "<Finding Title>", "description": "<Detailed explanation>", "evidence": "<Specific data point or number>" }},
+    ... (5-8 findings)
+  ]
+}}
+
+TEMPLATE FOR summary_paragraph:
+"The company exhibits a [Low / Moderate / High] fraud risk with an overall score of {score['overall_score']}/100. [2-3 sentences about key findings: what the M-Score says, major red flags or positive signals detected, and how financials trend over the years]. [1 sentence on the overall recommendation — whether the company appears clean or warrants further scrutiny]."
 
 Rules:
-- Use ## headings exactly as shown above — do NOT use numbered sections
 - Be specific — cite actual numbers from the data
 - Use plain English, no jargon
 - Be balanced — mention both risks AND positives
-- Keep it under 300 words
-- Format in markdown with bullet points using - dashes
+- The summary_paragraph should be exactly 1 paragraph, 4-6 sentences
+- Include 5-8 pointwise findings covering: executive summary, key concerns, positive indicators, and recommendation
 - Do NOT mention the AI model or system used to generate this report
+- Do NOT use any Unicode special characters like emojis, Rupee signs, or fancy dashes — use plain ASCII only
 """
     return prompt
 
 
+def _is_quota_error(e: Exception) -> bool:
+    """Return True if this exception is a Gemini quota/rate-limit error."""
+    msg = str(e).lower()
+    return any(k in msg for k in ("quota", "resource_exhausted", "resourceexhausted", "429", "rate limit", "per day"))
+
+
 def generate_forensic_report(ticker, company_info, financials, beneish, signals, signal_summary, score, peer_comparison):
     """
-    Generate a plain-English forensic audit report using Gemini.
-
-    Returns:
-        str — the generated report in markdown, or error message
+    Generate a structured JSON forensic audit report using Gemini.
+    Returns fallback immediately on quota errors — no retrying.
     """
+    risk_level = score.get("risk_level", "Unknown") if score else "Unknown"
+    overall = score.get("overall_score", "N/A") if score else "N/A"
+    m_score = beneish.get("m_score", "N/A") if beneish else "N/A"
+    total_flags = signal_summary.get("total", 0) if signal_summary else 0
+
+    def _fallback(reason=""):
+        print(f"[llm] Returning fallback ({reason})")
+        return {
+            "summary_paragraph": (
+                f"The company exhibits a {risk_level} fraud risk with an overall score of {overall}/100. "
+                f"The Beneish M-Score is {m_score}. A total of {total_flags} forensic red flags were detected. "
+                f"Please refer to the detailed charts and signal analysis for more information."
+            ),
+            "pointwise_report": [
+                {
+                    "title": "AI Report Unavailable",
+                    "description": f"Could not generate detailed AI analysis: {reason or 'API error'}",
+                    "evidence": "Fallback data used — re-run analysis to retry"
+                }
+            ]
+        }
+
     try:
         prompt = _build_prompt(
             ticker, company_info, financials, beneish,
@@ -109,9 +136,31 @@ def generate_forensic_report(ticker, company_info, financials, beneish, signals,
         )
 
         model = genai.GenerativeModel("gemini-2.5-flash")
-        response = model.generate_content(prompt)
 
-        return response.text
+        # Attempt generation — catch quota errors immediately, don't wait/retry
+        try:
+            from google.api_core.retry import Retry
+            response = model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"},
+                request_options={"retry": None, "timeout": 10}
+            )
+        except Exception as api_err:
+            if _is_quota_error(api_err):
+                print(f"[llm] Quota exceeded — skipping AI report, continuing pipeline.")
+                return _fallback("Gemini free-tier daily quota exceeded (20 req/day)")
+            raise  # re-raise non-quota errors to outer handler
+
+        result = json.loads(response.text)
+
+        if "summary_paragraph" not in result:
+            result["summary_paragraph"] = "Analysis complete. Please review the pointwise findings below."
+        if "pointwise_report" not in result or not isinstance(result["pointwise_report"], list):
+            result["pointwise_report"] = []
+
+        return result
 
     except Exception as e:
-        return f"⚠️ Could not generate AI report: {str(e)}"
+        print(f"[llm] Error generating report: {e}")
+        return _fallback(str(e))
+

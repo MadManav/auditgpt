@@ -3,37 +3,495 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AuditGPT — Analyzing...</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>AuditGPT — Analyzing {{ ticker }}...</title>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: #F8F9FA;
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ── Navbar ── */
+        .navbar {
+            background: #ffffff;
+            border-bottom: 1px solid rgba(196,198,205,0.2);
+            padding: 0 40px;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .navbar-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+            color: #1A2B3C;
+        }
+        .navbar-logo svg { width: 20px; height: 20px; }
+        .navbar-logo span {
+            font-family: 'Manrope', sans-serif;
+            font-weight: 800;
+            font-size: 15px;
+            letter-spacing: -0.02em;
+            color: #1A2B3C;
+        }
+
+        /* ── Main layout ── */
+        .main {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+
+        .card {
+            background: #ffffff;
+            border-radius: 20px;
+            border: 1px solid rgba(196,198,205,0.25);
+            box-shadow: 0 4px 32px rgba(26,43,60,0.06);
+            padding: 48px 52px;
+            width: 100%;
+            max-width: 560px;
+        }
+
+        /* ── Header ── */
+        .card-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .scanning-icon {
+            width: 56px;
+            height: 56px;
+            background: rgba(0,82,204,0.08);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            position: relative;
+        }
+        .scanning-icon::after {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 20px;
+            border: 2px solid #0052CC;
+            opacity: 0;
+            animation: ping 2s ease-out infinite;
+        }
+        @keyframes ping {
+            0% { opacity: 0.6; transform: scale(1); }
+            100% { opacity: 0; transform: scale(1.25); }
+        }
+        .scanning-icon .material-symbols-outlined {
+            font-size: 28px;
+            color: #0052CC;
+            font-variation-settings: 'FILL' 1;
+        }
+        .card-header h1 {
+            font-family: 'Manrope', sans-serif;
+            font-size: 22px;
+            font-weight: 800;
+            color: #1A2B3C;
+            letter-spacing: -0.03em;
+            margin-bottom: 6px;
+        }
+        .ticker-badge {
+            display: inline-block;
+            background: rgba(0,82,204,0.08);
+            color: #0052CC;
+            font-family: 'Manrope', sans-serif;
+            font-weight: 700;
+            font-size: 13px;
+            padding: 3px 12px;
+            border-radius: 100px;
+            letter-spacing: 0.04em;
+        }
+
+        /* ── Steps ── */
+        .steps { display: flex; flex-direction: column; gap: 10px; margin-bottom: 36px; }
+
+        .step {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 16px;
+            border-radius: 12px;
+            border: 1px solid transparent;
+            opacity: 0.3;
+            transform: translateX(-6px);
+            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            background: transparent;
+        }
+        .step.active {
+            opacity: 1;
+            transform: translateX(0);
+            background: rgba(0,82,204,0.04);
+            border-color: rgba(0,82,204,0.12);
+        }
+        .step.done {
+            opacity: 1;
+            transform: translateX(0);
+            background: rgba(22,163,74,0.04);
+            border-color: rgba(22,163,74,0.15);
+        }
+        .step.error-step {
+            opacity: 1;
+            transform: translateX(0);
+            background: rgba(215,58,73,0.04);
+            border-color: rgba(215,58,73,0.2);
+        }
+
+        .step-indicator {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            background: rgba(116,119,125,0.1);
+            transition: background 0.3s;
+            position: relative;
+        }
+        .step.active .step-indicator {
+            background: rgba(0,82,204,0.12);
+        }
+        .step.done .step-indicator {
+            background: rgba(22,163,74,0.12);
+        }
+        .step-indicator .material-symbols-outlined {
+            font-size: 18px;
+            color: #74777d;
+            font-variation-settings: 'FILL' 1;
+            transition: color 0.3s;
+        }
+        .step.active .step-indicator .material-symbols-outlined { color: #0052CC; }
+        .step.done .step-indicator .material-symbols-outlined { color: #16a34a; }
+
+        /* Active step spinner overlay */
+        .step-spinner {
+            position: absolute;
+            inset: -3px;
+            border-radius: 12px;
+            border: 2px solid transparent;
+            border-top-color: #0052CC;
+            animation: spin 0.8s linear infinite;
+            display: none;
+        }
+        .step.active .step-spinner { display: block; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .step-content { flex: 1; }
+        .step-label {
+            font-weight: 600;
+            font-size: 13.5px;
+            color: #44474c;
+            transition: color 0.3s;
+            line-height: 1.3;
+        }
+        .step.active .step-label { color: #1A2B3C; }
+        .step.done .step-label { color: #16a34a; }
+
+        .step-sublabel {
+            font-size: 11px;
+            color: #74777d;
+            margin-top: 2px;
+            height: 0;
+            overflow: hidden;
+            opacity: 0;
+            transition: all 0.3s ease;
+        }
+        .step.active .step-sublabel { height: 16px; opacity: 1; }
+
+        .step-status {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #74777d;
+        }
+        .step.active .step-status { color: #0052CC; }
+        .step.done .step-status { color: #16a34a; }
+
+        /* ── Progress bar ── */
+        .progress-wrap {
+            background: #edeeef;
+            border-radius: 100px;
+            height: 4px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #0052CC, #1a6de0);
+            border-radius: 100px;
+            width: 0%;
+            transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #74777d;
+            font-weight: 500;
+        }
+        .progress-label span:last-child { font-weight: 700; color: #1A2B3C; }
+
+        /* ── Footer note ── */
+        .footer-note {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            margin-top: 28px;
+            font-size: 11px;
+            color: #74777d;
+        }
+        .footer-note .dot {
+            width: 5px; height: 5px;
+            background: #0052CC;
+            border-radius: 50%;
+            animation: blink 1.4s ease-in-out infinite;
+        }
+        .footer-note .dot:nth-child(2) { animation-delay: 0.2s; }
+        .footer-note .dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes blink {
+            0%, 80%, 100% { opacity: 0.2; }
+            40% { opacity: 1; }
+        }
+    </style>
 </head>
 <body>
-    <div class="container loading-container">
-        <h1>Analyzing {{ ticker }}...</h1>
 
-        <div class="progress-steps">
-            <div class="step" id="step-1">
-                <span class="step-icon">📥</span>
-                <span class="step-text">Fetching financial data...</span>
+    <!-- Navbar -->
+    <nav class="navbar">
+        <a href="/" class="navbar-logo">
+            <svg fill="none" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                <path clip-rule="evenodd" d="M47.2426 24L24 47.2426L0.757355 24L24 0.757355L47.2426 24ZM12.2426 21H35.7574L24 9.24264L12.2426 21Z" fill="currentColor" fill-rule="evenodd"/>
+            </svg>
+            <span>AuditGPT</span>
+        </a>
+    </nav>
+
+    <!-- Main -->
+    <main class="main">
+        <div class="card">
+            <!-- Header -->
+            <div class="card-header">
+                <div class="scanning-icon">
+                    <span class="material-symbols-outlined">manage_search</span>
+                </div>
+                <h1>Forensic Analysis</h1>
+                <span class="ticker-badge">{{ ticker }}</span>
             </div>
-            <div class="step" id="step-2">
-                <span class="step-icon">🔍</span>
-                <span class="step-text">Running fraud signal detection...</span>
+
+            <!-- Steps -->
+            <div class="steps">
+                <div class="step" id="step-1">
+                    <div class="step-indicator">
+                        <span class="material-symbols-outlined">download</span>
+                        <div class="step-spinner"></div>
+                    </div>
+                    <div class="step-content">
+                        <div class="step-label">Fetching financial data</div>
+                        <div class="step-sublabel">Pulling 5yr income, balance sheet &amp; cash flow</div>
+                    </div>
+                    <span class="step-status">Pending</span>
+                </div>
+
+                <div class="step" id="step-2">
+                    <div class="step-indicator">
+                        <span class="material-symbols-outlined">crisis_alert</span>
+                        <div class="step-spinner"></div>
+                    </div>
+                    <div class="step-content">
+                        <div class="step-label">Running fraud signal detection</div>
+                        <div class="step-sublabel">Checking 20+ forensic anomaly patterns</div>
+                    </div>
+                    <span class="step-status">Pending</span>
+                </div>
+
+                <div class="step" id="step-3">
+                    <div class="step-indicator">
+                        <span class="material-symbols-outlined">calculate</span>
+                        <div class="step-spinner"></div>
+                    </div>
+                    <div class="step-content">
+                        <div class="step-label">Computing Beneish M-Score</div>
+                        <div class="step-sublabel">8-variable earnings manipulation model</div>
+                    </div>
+                    <span class="step-status">Pending</span>
+                </div>
+
+                <div class="step" id="step-4">
+                    <div class="step-indicator">
+                        <span class="material-symbols-outlined">gavel</span>
+                        <div class="step-spinner"></div>
+                    </div>
+                    <div class="step-content">
+                        <div class="step-label">Analysing auditor sentiment</div>
+                        <div class="step-sublabel">Parsing auditor opinions &amp; flags</div>
+                    </div>
+                    <span class="step-status">Pending</span>
+                </div>
+
+                <div class="step" id="step-5">
+                    <div class="step-indicator">
+                        <span class="material-symbols-outlined">groups</span>
+                        <div class="step-spinner"></div>
+                    </div>
+                    <div class="step-content">
+                        <div class="step-label">Benchmarking against peers</div>
+                        <div class="step-sublabel">Industry sector comparison</div>
+                    </div>
+                    <span class="step-status">Pending</span>
+                </div>
+
+                <div class="step" id="step-6">
+                    <div class="step-indicator">
+                        <span class="material-symbols-outlined">smart_toy</span>
+                        <div class="step-spinner"></div>
+                    </div>
+                    <div class="step-content">
+                        <div class="step-label">Generating AI forensic report</div>
+                        <div class="step-sublabel">Synthesising findings with Gemini</div>
+                    </div>
+                    <span class="step-status">Pending</span>
+                </div>
             </div>
-            <div class="step" id="step-3">
-                <span class="step-icon">📊</span>
-                <span class="step-text">Benchmarking against industry peers...</span>
+
+            <!-- Progress -->
+            <div class="progress-wrap">
+                <div class="progress-bar" id="progressBar"></div>
             </div>
-            <div class="step" id="step-4">
-                <span class="step-icon">📝</span>
-                <span class="step-text">Analyzing auditor reports...</span>
+            <div class="progress-label">
+                <span id="progressText">Starting analysis…</span>
+                <span id="progressPct">0%</span>
             </div>
-            <div class="step" id="step-5">
-                <span class="step-icon">🤖</span>
-                <span class="step-text">Generating forensic report...</span>
+
+            <!-- Footer dots -->
+            <div class="footer-note">
+                <div class="dot"></div>
+                <div class="dot"></div>
+                <div class="dot"></div>
+                <span>Deep forensic scan in progress — this may take 30–60 seconds</span>
             </div>
         </div>
-    </div>
+    </main>
 
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script>
+        const JOB_ID = "{{ job_id }}";
+        const TOTAL = 6;
+        const steps = [];
+        for (let i = 1; i <= TOTAL; i++) steps.push(document.getElementById('step-' + i));
+
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        const progressPct  = document.getElementById('progressPct');
+
+        const labels = [
+            'Fetching financial data…',
+            'Running fraud signals…',
+            'Computing M-Score…',
+            'Analysing auditor reports…',
+            'Benchmarking peers…',
+            'Generating AI report…',
+        ];
+
+        // Step durations (ms) — cosmetic animation, runs independent of real backend
+        const durations = [4500, 5000, 4000, 6000, 4500, 99999]; // last step waits for real done
+        let currentStep = 0;
+        let animationDone = false;
+        let backendDone = false;
+        let backendRedirect = null;
+
+        function setStatus(el, text) {
+            el.querySelector('.step-status').textContent = text;
+        }
+        function activateStep(idx) {
+            if (idx >= TOTAL) { animationDone = true; maybeRedirect(); return; }
+            steps[idx].classList.add('active');
+            setStatus(steps[idx], 'Running…');
+            const pct = Math.round((idx / TOTAL) * 100);
+            progressBar.style.width = pct + '%';
+            progressText.textContent = labels[idx];
+            progressPct.textContent = pct + '%';
+        }
+        function completeStep(idx) {
+            steps[idx].classList.remove('active');
+            steps[idx].classList.add('done');
+            setStatus(steps[idx], '✓ Done');
+            const pct = Math.round(((idx + 1) / TOTAL) * 100);
+            progressBar.style.width = pct + '%';
+            progressPct.textContent = pct + '%';
+        }
+        function runStep(idx) {
+            if (idx >= TOTAL) { animationDone = true; maybeRedirect(); return; }
+            activateStep(idx);
+            currentStep = idx;
+            // Last step: wait for backend done signal instead of timeout
+            if (idx === TOTAL - 1) return;
+            setTimeout(() => { completeStep(idx); setTimeout(() => runStep(idx + 1), 300); }, durations[idx]);
+        }
+
+        function maybeRedirect() {
+            if (backendDone && animationDone && backendRedirect) {
+                window.location.href = backendRedirect;
+            }
+        }
+
+        // ── Real backend polling ──
+        function poll() {
+            fetch('/status/' + JOB_ID)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'done') {
+                        backendDone = true;
+                        backendRedirect = data.redirect;
+                        // Finish any remaining animation steps quickly
+                        finishAllSteps();
+                    } else if (data.status === 'error') {
+                        progressText.textContent = '⚠ ' + (data.error || 'Analysis failed');
+                        progressPct.textContent = '';
+                        progressBar.style.background = '#D73A49';
+                    } else {
+                        setTimeout(poll, 2000);
+                    }
+                })
+                .catch(() => setTimeout(poll, 3000));
+        }
+
+        function finishAllSteps() {
+            // Complete remaining steps rapidly then redirect
+            const remaining = TOTAL - 1 - currentStep;
+            let delay = 0;
+            for (let i = currentStep; i < TOTAL; i++) {
+                const idx = i;
+                setTimeout(() => {
+                    completeStep(idx);
+                    if (idx === TOTAL - 1) {
+                        progressBar.style.width = '100%';
+                        progressPct.textContent = '100%';
+                        progressText.textContent = 'Complete — loading report…';
+                        animationDone = true;
+                        setTimeout(maybeRedirect, 500);
+                    }
+                }, delay);
+                delay += 350;
+            }
+        }
+
+        // Boot
+        setTimeout(() => { runStep(0); poll(); }, 600);
+    </script>
 </body>
 </html>

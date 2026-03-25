@@ -3,14 +3,21 @@ app.py — Flask Routes & Blueprint (Person 3)
 Handles web routes and orchestrates the full analysis pipeline.
 """
 
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for, make_response, session
 import time
 import traceback
 import json
 import csv
 import os
+import threading
+import uuid
 
 bp = Blueprint('main', __name__)
+
+
+
+# Background job store: { job_id: { 'status': 'running'|'done'|'error', 'result': ..., 'error': ... } }
+_jobs = {}
 
 # ── Load NSE ticker list at startup ──
 _TICKER_MAP = {}  # { "SYMBOL": "Company Name", ... }
@@ -156,25 +163,18 @@ def _run_pipeline(ticker):
     except Exception as e:
         print(f"[app] Promoter tracker failed: {e}")
 
-    # Step 8 — LLM forensic report (Gemini)
+    # Step 8 — LLM forensic report (Gemini) — returns structured JSON
+    ai_report_json = None
     try:
         from ui.llm import generate_forensic_report
-        ai_report = generate_forensic_report(
+        ai_report_json = generate_forensic_report(
             ticker, company_info, financials, beneish,
             signals, signal_summary, score, peer_comparison
         )
-    except Exception:
-        ai_report = None
-
-    # Step 9 — Related Party Transaction analysis (Gemini)
-    rpt_data = None
-    try:
-        from analysis.rpt_analysis import analyze_rpt
-        company_name_rpt = company_info.get("name", ticker) if company_info else ticker
-        rpt_years = [int(str(y)[:4]) for y in financials.get("years", [])]
-        rpt_data = analyze_rpt(ticker, company_name_rpt, rpt_years)
     except Exception as e:
-        print(f"[app] RPT analysis failed: {e}")
+        print(f"[app] LLM report failed: {e}")
+        ai_report_json = None
+
 
     # Pre-serialize chart data to avoid Jinja2 Undefined→tojson crashes
     years = financials.get("years", []) if financials else []
@@ -194,13 +194,6 @@ def _run_pipeline(ticker):
                 result.append(None)
         return result
 
-    # RPT data — presence score per year (0 = no flag, 1 = flagged)
-    rpt_years = []
-    rpt_scores = []
-    if auditor_sentiment and auditor_sentiment.get("years"):
-        for y in auditor_sentiment["years"]:
-            rpt_years.append(y.get("year"))
-            rpt_scores.append(1 if y.get("related_party_flag") else 0)
 
     # Compute red flag counts per year by severity
     _rf_counts = {}  # { year: {high: N, medium: N, low: N} }
@@ -224,14 +217,6 @@ def _run_pipeline(ticker):
         "sentScores": [],
         "peerMetrics": peer_comparison.get("company_metrics", {}) if peer_comparison else {},
         "peerAvgs": peer_comparison.get("peer_averages", {}) if peer_comparison else {},
-        # RPT chart (old auditor-based)
-        "rptYears": rpt_years,
-        "rptScores": rpt_scores,
-        # RPT Gemini analysis chart
-        "rptGeminiYears": [],
-        "rptGeminiValues": [],
-        "rptGeminiGrowth": [],
-        "rptGeminiFlags": [],
         # Anomaly deviation map
         "anomalyYears": years[1:] if len(years) > 1 else [],
         "anomalyRevenue": _yoy(revenue)[1:] if len(revenue) > 1 else [],
@@ -260,19 +245,16 @@ def _run_pipeline(ticker):
         chart_data["mismatchMgmt"] = []
         chart_data["mismatchGaps"] = []
 
-    # RPT Gemini chart data
-    if rpt_data and rpt_data.get("years"):
-        chart_data["rptGeminiYears"] = [y.get("year") for y in rpt_data["years"]]
-        chart_data["rptGeminiValues"] = [y.get("rpt_total_cr", 0) for y in rpt_data["years"]]
-        chart_data["rptGeminiGrowth"] = [y.get("yoy_growth_pct") for y in rpt_data["years"]]
-        chart_data["rptGeminiFlags"] = [y.get("flag", False) for y in rpt_data["years"]]
 
-    return {
+    show_beneish = score.get("sector_used") not in {"Banking", "Financial Services", "Insurance"}
+
+    results = {
         "ticker": ticker,
         "company_info": company_info,
         "financials": financials,
-        "beneish": beneish,
-        "beneish_trend": beneish_trend,
+        "beneish": beneish if show_beneish else None,
+        "beneish_trend": beneish_trend if show_beneish else None,
+        "show_beneish": show_beneish,
         "signals": signals,
         "signal_summary": signal_summary,
         "auditor_sentiment": auditor_sentiment,
@@ -280,11 +262,12 @@ def _run_pipeline(ticker):
         "tone_mismatch": tone_mismatch,
         "score": score,
         "peer_comparison": peer_comparison,
-        "ai_report": ai_report,
+        "ai_report_json": ai_report_json,
         "promoter_data": promoter_data,
-        "rpt_data": rpt_data,
         "chart_data_json": json.dumps(chart_data),
     }
+
+    return results
 
 
 @bp.route('/')
@@ -293,32 +276,64 @@ def index():
     return render_template('index.html')
 
 
+
+
+
 @bp.route('/analyze', methods=['POST'])
 def analyze():
     """
-    Run the full 5-step forensic analysis pipeline and render report.
+    Immediately returns loading.html, kicks off pipeline in background thread.
     """
     raw_input = request.form.get('ticker', '').strip()
     if not raw_input:
         return render_template('index.html', error="Please enter a stock ticker or company name.")
 
-    # Resolve company name to ticker symbol
     ticker = _resolve_ticker(raw_input)
-
-    # Add .NS suffix if not present (assume NSE)
     if '.' not in ticker:
         ticker = ticker + '.NS'
 
-    try:
-        start_time = time.time()
-        results = _run_pipeline(ticker)
-        elapsed = round(time.time() - start_time, 1)
-        results['elapsed_time'] = elapsed
+    job_id = str(uuid.uuid4())
+    _jobs[job_id] = {'status': 'running', 'result': None, 'error': None}
 
-        return render_template('report.html', **results)
+    def _run():
+        try:
+            start_time = time.time()
+            results = _run_pipeline(ticker)
+            results['elapsed_time'] = round(time.time() - start_time, 1)
+            _jobs[job_id]['result'] = results
+            _jobs[job_id]['status'] = 'done'
+        except ValueError as e:
+            _jobs[job_id]['status'] = 'error'
+            _jobs[job_id]['error'] = str(e)
+        except Exception as e:
+            traceback.print_exc()
+            _jobs[job_id]['status'] = 'error'
+            _jobs[job_id]['error'] = f"Analysis failed: {str(e)}"
 
-    except ValueError as e:
-        return render_template('index.html', error=str(e))
-    except Exception as e:
-        traceback.print_exc()
-        return render_template('index.html', error=f"Analysis failed: {str(e)}")
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+    return render_template('loading.html', ticker=ticker, job_id=job_id)
+
+
+@bp.route('/status/<job_id>')
+def status(job_id):
+    """Polling endpoint — returns JSON with status and redirect URL when done."""
+    job = _jobs.get(job_id)
+    if not job:
+        return jsonify({'status': 'error', 'error': 'Job not found'}), 404
+    if job['status'] == 'done':
+        return jsonify({'status': 'done', 'redirect': url_for('main.report', job_id=job_id)})
+    if job['status'] == 'error':
+        return jsonify({'status': 'error', 'error': job['error']})
+    return jsonify({'status': 'running'})
+
+
+@bp.route('/report/<job_id>')
+def report(job_id):
+    """Render the final report once the job is done."""
+    job = _jobs.get(job_id)
+    if not job or job['status'] != 'done':
+        return redirect(url_for('main.index'))
+    results = job['result']
+    return render_template('report.html', **results)
