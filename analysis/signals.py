@@ -483,18 +483,137 @@ ALL_CHECKS = [
 ]
 
 
+# ──────────────────────────────────────────────
+# Sector-aware signal exclusions
+# ──────────────────────────────────────────────
+# Some checks are MATHEMATICALLY INVALID for certain sectors.
+# (e.g., Altman Z-Score was designed for manufacturing — every bank in the
+# world scores "distress zone" because deposits = liabilities.)
+# These are fully skipped, not just discounted.
+
+_SECTOR_EXCLUDED_CHECKS = {
+    # Banks: Altman Z designed for manufacturing, cash flows work differently
+    "Banking": {
+        _check_altman_z_score,
+        _check_revenue_vs_cashflow,
+        _check_declining_cashflow,
+        _check_profit_vs_cashflow,
+        _check_cash_conversion,
+        _check_revenue_quality,
+        _check_inventory_buildup,       # Banks don't have inventory
+        _check_depreciation_slowdown,   # Minimal fixed assets
+    },
+    "Financial Services": {
+        _check_altman_z_score,
+        _check_revenue_vs_cashflow,
+        _check_declining_cashflow,
+        _check_profit_vs_cashflow,
+        _check_cash_conversion,
+        _check_revenue_quality,
+        _check_inventory_buildup,
+    },
+    # Energy: Massive asset base + capex-heavy expansion → Altman Z always low,
+    # working capital structurally negative, cash flows volatile during capex cycles
+    "Energy": {
+        _check_altman_z_score,
+        _check_working_capital_decline,  # Negative WC is structural
+        _check_depreciation_slowdown,    # Depreciation policy varies with asset mix
+    },
+    # Infra/Construction: Project-based, high debt, long cash cycles
+    "Infra": {
+        _check_altman_z_score,
+        _check_working_capital_decline,
+    },
+    # Telecom: Massive spectrum/tower debt, long payback periods
+    "Telecom": {
+        _check_altman_z_score,
+        _check_working_capital_decline,
+    },
+    # Metals: Cyclical, heavy assets, Altman Z biased
+    "Metals": {
+        _check_altman_z_score,
+    },
+    # Auto: Negative WC from dealer deposits/advances is structural,
+    # Altman Z grey zone is common for capital-intensive manufacturers
+    "Auto": {
+        _check_altman_z_score,
+        _check_working_capital_decline,
+    },
+    # FMCG: Negative WC is a sign of strength (supplier bargaining power),
+    # not distress. High other income from investments is structural.
+    "FMCG": {
+        _check_working_capital_decline,
+    },
+    # Pharma: High R&D cycles create volatile cash conversion
+    "Pharma": {
+        _check_altman_z_score,
+    },
+    # Realty: Debt-funded, lumpy cash flows
+    "Realty": {
+        _check_altman_z_score,
+        _check_working_capital_decline,
+        _check_declining_cashflow,       # Lumpy project completions
+    },
+}
+
+# Industry resolution — same logic as scorer.py
+_INDUSTRY_MAP = {
+    "Banks - Regional": "Banking", "Banks - Diversified": "Banking",
+    "Insurance": "Financial Services", "Credit Services": "Financial Services",
+    "Capital Markets": "Financial Services",
+    "Oil & Gas E&P": "Energy", "Oil & Gas Integrated": "Energy",
+    "Oil & Gas Refining & Marketing": "Energy",
+    "Cement": "Infra", "Building Materials": "Infra",
+    "Steel": "Metals", "Aluminum": "Metals", "Copper": "Metals",
+    "Telecom Services": "Telecom",
+    "Residential Construction": "Realty",
+    "Auto Manufacturers": "Auto", "Auto Parts": "Auto",
+    "Auto - Manufacturers": "Auto", "Auto - Parts": "Auto",
+    "Drug Manufacturers": "Pharma", "Drug Manufacturers - General": "Pharma",
+    "Drug Manufacturers - Specialty & Generic": "Pharma", "Biotechnology": "Pharma",
+    "Packaged Foods": "FMCG", "Household & Personal Products": "FMCG",
+    "Beverages - Non-Alcoholic": "FMCG", "Tobacco": "FMCG",
+}
+_SECTOR_MAP = {
+    "Financial Services": "Financial Services",
+    "Energy": "Energy",
+    "Basic Materials": "Metals",
+    "Industrials": "Infra",
+    "Communication Services": "Telecom",
+    "Real Estate": "Realty",
+    "Consumer Cyclical": "Auto",
+    "Consumer Defensive": "FMCG",
+    "Healthcare": "Pharma",
+    "Utilities": "Energy",
+}
+
+
+def _resolve_signal_sector(financials: dict) -> str:
+    """Resolve sector for signal exclusion."""
+    raw_industry = financials.get("industry", "Unknown")
+    raw_sector = financials.get("sector", "Unknown")
+    return _INDUSTRY_MAP.get(raw_industry, _SECTOR_MAP.get(raw_sector, raw_sector))
+
+
 def detect_fraud_signals(financials: dict) -> list:
     """
     Run all fraud signal checks across all years.
+    Now SECTOR-AWARE: skips checks that are fundamentally invalid for
+    certain sectors (e.g., Altman Z-Score for banks).
 
     Returns:
         list of signal dicts, each with: name, triggered, severity, explanation, year
         Only includes signals that were triggered (red flags).
     """
+    sector = _resolve_signal_sector(financials)
+    excluded_checks = _SECTOR_EXCLUDED_CHECKS.get(sector, set())
+
     all_signals = []
     n_years = len(financials["years"])
 
     for check_fn in ALL_CHECKS:
+        if check_fn in excluded_checks:
+            continue  # Skip entirely — invalid for this sector
         for idx in range(1, n_years):
             result = check_fn(financials, idx)
             if result and result["triggered"]:

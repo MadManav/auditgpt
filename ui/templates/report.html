@@ -109,6 +109,60 @@
         .text-danger { color: #dc2626; }
         .text-warning { color: #d97706; }
         .text-success { color: #16a34a; }
+
+        /* AI report section cards */
+        .report-section {
+            padding: 1.25rem 1.5rem;
+            border-radius: 0.875rem;
+            border-left: 4px solid;
+            background: linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,249,250,0.9) 100%);
+            transition: box-shadow 0.3s, transform 0.2s;
+        }
+        .report-section:hover {
+            box-shadow: 0 6px 24px rgba(4,22,39,0.06);
+            transform: translateY(-1px);
+        }
+        .report-section h3 {
+            font-family: 'Manrope', sans-serif;
+            font-weight: 700;
+            font-size: 0.9rem;
+            letter-spacing: -0.01em;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .report-section ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .report-section li {
+            position: relative;
+            padding: 0.4rem 0 0.4rem 1.25rem;
+            font-size: 0.82rem;
+            line-height: 1.6;
+            color: #44474c;
+        }
+        .report-section li::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0.75rem;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+        .rs-summary { border-left-color: #0453cd; }
+        .rs-summary li::before { background: #0453cd; }
+        .rs-findings { border-left-color: #7c3aed; }
+        .rs-findings li::before { background: #7c3aed; }
+        .rs-risk { border-left-color: #dc2626; }
+        .rs-risk li::before { background: #dc2626; }
+        .rs-positive { border-left-color: #16a34a; }
+        .rs-positive li::before { background: #16a34a; }
+        .rs-recommend { border-left-color: #d97706; }
+        .rs-recommend li::before { background: #d97706; }
     </style>
 </head>
 <body class="bg-background text-on-surface font-body antialiased">
@@ -247,16 +301,152 @@
                 </div>
             </div>
 
-            <!-- AI Forensic Report (full width) -->
-            {% if ai_report %}
-            <div class="col-span-12 bento p-6 fade-up fade-up-3">
-                <div class="flex items-center gap-2 mb-3">
-                    <span class="material-symbols-outlined text-secondary mi">smart_toy</span>
-                    <h2 class="font-headline text-lg font-bold text-primary">AI Forensic Report</h2>
-                    <span class="ml-auto text-[10px] bg-secondary/10 text-secondary px-2 py-0.5 rounded-full font-bold">GEMINI</span>
+            <!-- ── Promoter / Insider Behaviour Tracker ────────── -->
+            {% if promoter_data and promoter_data.available %}
+            <div class="col-span-12 bento p-0 fade-up fade-up-3 overflow-hidden">
+                <!-- Header -->
+                <div class="px-6 py-4 flex items-center justify-between" style="background: linear-gradient(135deg, #1e293b 0%, #334155 60%, #475569 100%);">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-lg bg-white/10 backdrop-blur flex items-center justify-center">
+                            <span class="material-symbols-outlined text-white text-lg mi">person_search</span>
+                        </div>
+                        <div>
+                            <h2 class="font-headline text-base font-bold text-white tracking-tight">Promoter & Insider Tracker</h2>
+                            <p class="text-[10px] text-white/60">Insider holding & transaction analysis</p>
+                        </div>
+                    </div>
+                    <span class="text-[10px] uppercase tracking-widest font-bold px-3 py-1.5 rounded-lg
+                        {{ 'bg-red-500/20 text-red-300 border border-red-400/30' if promoter_data.risk_level == 'CRITICAL' else ('bg-amber-500/20 text-amber-300 border border-amber-400/30' if promoter_data.risk_level == 'HIGH' else ('bg-yellow-500/20 text-yellow-300 border border-yellow-400/30' if promoter_data.risk_level == 'MEDIUM' else 'bg-green-500/20 text-green-300 border border-green-400/30')) }}">
+                        {{ promoter_data.risk_level }} RISK
+                    </span>
                 </div>
-                <div class="prose prose-sm max-w-none text-on-surface-variant leading-relaxed">
-                    {{ ai_report | safe }}
+
+                <div class="p-6 grid grid-cols-12 gap-5">
+                    <!-- Left: Holding & Summary -->
+                    <div class="col-span-12 md:col-span-4">
+                        {% if promoter_data.promoter_holding_pct is not none %}
+                        <div class="text-center mb-5">
+                            <span class="text-4xl font-headline font-extrabold {{ 'text-red-600' if promoter_data.promoter_holding_pct < 20 else ('text-amber-600' if promoter_data.promoter_holding_pct < 35 else 'text-green-600') }}">
+                                {{ promoter_data.promoter_holding_pct }}%
+                            </span>
+                            <p class="text-xs text-on-surface-variant mt-1">Promoter / Insider Holding</p>
+                        </div>
+                        {% endif %}
+
+                        <!-- Net Activity Badge -->
+                        <div class="flex justify-center mb-4">
+                            {% if promoter_data.net_insider_activity == 'heavy_selling' %}
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-red-100 text-red-700">
+                                <span class="material-symbols-outlined text-sm">trending_down</span> Heavy Insider Selling
+                            </span>
+                            {% elif promoter_data.net_insider_activity == 'net_selling' %}
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">
+                                <span class="material-symbols-outlined text-sm">south</span> Net Insider Selling
+                            </span>
+                            {% elif promoter_data.net_insider_activity == 'heavy_buying' %}
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-green-100 text-green-700">
+                                <span class="material-symbols-outlined text-sm">trending_up</span> Strong Insider Buying
+                            </span>
+                            {% elif promoter_data.net_insider_activity == 'net_buying' %}
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">
+                                <span class="material-symbols-outlined text-sm">north</span> Net Insider Buying
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-gray-100 text-gray-600">
+                                <span class="material-symbols-outlined text-sm">balance</span> Neutral Activity
+                            </span>
+                            {% endif %}
+                        </div>
+
+                        <!-- Promoter Flags -->
+                        {% if promoter_data.flags %}
+                        <div class="space-y-2 mt-3">
+                            {% for flag in promoter_data.flags %}
+                            <div class="p-2.5 rounded-lg text-xs {{ 'bg-red-50 border border-red-200' if flag.severity == 'high' else ('bg-amber-50 border border-amber-200' if flag.severity == 'medium' else 'bg-green-50 border border-green-200') }}">
+                                <div class="font-bold {{ 'text-red-700' if flag.severity == 'high' else ('text-amber-700' if flag.severity == 'medium' else 'text-green-700') }}">
+                                    {{ flag.name }}
+                                </div>
+                                <div class="text-on-surface-variant mt-0.5">{{ flag.detail }}</div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Right: Recent Transactions -->
+                    <div class="col-span-12 md:col-span-8">
+                        <h3 class="text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-3">Recent Insider Transactions</h3>
+                        {% if promoter_data.insider_transactions %}
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-xs">
+                                <thead>
+                                    <tr class="border-b border-outline-variant/30">
+                                        <th class="text-left py-2 text-on-surface-variant font-semibold">Insider</th>
+                                        <th class="text-center py-2 text-on-surface-variant font-semibold">Type</th>
+                                        <th class="text-right py-2 text-on-surface-variant font-semibold">Shares</th>
+                                        <th class="text-right py-2 text-on-surface-variant font-semibold">Value</th>
+                                        <th class="text-right py-2 text-on-surface-variant font-semibold">Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for txn in promoter_data.insider_transactions %}
+                                    <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low/50">
+                                        <td class="py-2 font-medium text-on-surface">{{ txn.insider }}</td>
+                                        <td class="py-2 text-center">
+                                            <span class="inline-flex px-2 py-0.5 rounded text-[10px] font-bold
+                                                {{ 'bg-red-100 text-red-700' if txn.type == 'SELL' else ('bg-green-100 text-green-700' if txn.type == 'BUY' else 'bg-gray-100 text-gray-600') }}">
+                                                {{ txn.type }}
+                                            </span>
+                                        </td>
+                                        <td class="py-2 text-right text-on-surface">{{ "{:,}".format(txn.shares) }}</td>
+                                        <td class="py-2 text-right {{ 'text-red-600' if txn.type == 'SELL' else 'text-green-600' }}">
+                                            {{ "₹{:,.0f}".format(txn.value) if txn.value else '—' }}
+                                        </td>
+                                        <td class="py-2 text-right text-on-surface-variant">{{ txn.date }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <p class="text-xs text-on-surface-variant">No recent insider transactions available.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- AI Forensic Report (full width) — Enhanced Structured Layout -->
+            {% if ai_report %}
+            <div class="col-span-12 bento p-0 fade-up fade-up-3 overflow-hidden">
+                <!-- Report Header Banner -->
+                <div class="px-6 py-5 md:px-8" style="background: linear-gradient(135deg, #041627 0%, #1a2b3c 60%, #0453cd 100%);">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl bg-white/10 backdrop-blur flex items-center justify-center">
+                                <span class="material-symbols-outlined text-white text-xl mi">shield</span>
+                            </div>
+                            <div>
+                                <h2 class="font-headline text-lg font-bold text-white tracking-tight">AI Forensic Report</h2>
+                                <p class="text-[11px] text-white/60">{{ company_info.name if company_info else ticker }} · Automated Analysis</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] uppercase tracking-widest font-bold px-3 py-1.5 rounded-lg
+                                {{ 'bg-red-500/20 text-red-300 border border-red-400/30' if score.overall_score >= 70 else ('bg-amber-500/20 text-amber-300 border border-amber-400/30' if score.overall_score >= 50 else ('bg-yellow-500/20 text-yellow-300 border border-yellow-400/30' if score.overall_score >= 30 else 'bg-green-500/20 text-green-300 border border-green-400/30')) }}">
+                                Risk: {{ score.overall_score }}/100
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Report Body — parsed into sections -->
+                <div class="p-6 md:p-8">
+                    <div id="ai-report-sections" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <!-- JS will parse and render sections here -->
+                    </div>
+                    <!-- Hidden raw content for JS parsing -->
+                    <div id="ai-report-raw" class="hidden">{{ ai_report | safe }}</div>
                 </div>
             </div>
             {% endif %}
@@ -547,12 +737,32 @@
                 </div>
             </div>
 
-            <!-- Red Flag Timeline (full width) — Modern Design -->
+            <!-- ★ CHART: Red Flags Timeline Line Chart (full width) -->
+            <div class="col-span-12 bento p-6 fade-up fade-up-2">
+                <div class="flex items-center justify-between mb-1">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined text-on-tertiary-container mi">timeline</span>
+                        <h3 class="font-headline text-base font-bold text-primary">Red Flags Timeline</h3>
+                    </div>
+                    <div class="flex items-center gap-3 text-[10px]">
+                        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500 inline-block"></span> High</span>
+                        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block"></span> Medium</span>
+                        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span> Low</span>
+                        <span class="text-outline ml-1">{{ signals|length if signals else 0 }} total</span>
+                    </div>
+                </div>
+                <p class="text-[11px] text-on-surface-variant mb-4">Year-wise count of forensic anomalies by severity — spikes indicate areas of concern</p>
+                <div class="chart-container">
+                    <canvas id="chartRedFlagTimeline"></canvas>
+                </div>
+            </div>
+
+            <!-- Red Flag Detail Cards (full width) -->
             <div class="col-span-12 bento p-6 fade-up fade-up-3">
                 <div class="flex items-center justify-between mb-1">
                     <div class="flex items-center gap-2">
                         <span class="material-symbols-outlined text-on-tertiary-container mi">flag</span>
-                        <h3 class="font-headline text-base font-bold text-primary">Red Flag Timeline</h3>
+                        <h3 class="font-headline text-base font-bold text-primary">Red Flag Details</h3>
                     </div>
                     <div class="flex items-center gap-3 text-[10px]">
                         <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500 inline-block"></span> Critical</span>
@@ -595,6 +805,100 @@
                 </div>
                 {% endif %}
             </div>
+
+            <!-- ★ RPT Growth Chart (Gemini-powered) -->
+            <div class="col-span-12 bento p-6 fade-up fade-up-5">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="material-symbols-outlined text-secondary mi">swap_horiz</span>
+                    <h3 class="font-headline text-base font-bold text-primary">Related Party Transaction Growth</h3>
+                    <span class="ml-auto text-[10px] bg-secondary/10 text-secondary px-2 py-0.5 rounded-full font-bold">GEMINI</span>
+                </div>
+
+                {% if rpt_data and rpt_data.years %}
+                    {% if rpt_data.summary %}
+                    <p class="text-xs text-on-surface-variant mb-4 italic">{{ rpt_data.summary }}</p>
+                    {% endif %}
+                    {% if rpt_data.flag_count > 0 %}
+                    <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700 mb-4">
+                        <span class="material-symbols-outlined text-sm mi">warning</span>
+                        {{ rpt_data.flag_count }} year(s) flagged with unusual RPT growth (&gt;30% YoY)
+                    </div>
+                    {% endif %}
+                    <div class="chart-container">
+                        <canvas id="chartRPT"></canvas>
+                    </div>
+
+                    <!-- Flagged Years Detail -->
+                    {% if rpt_data.flags %}
+                    <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {% for f in rpt_data.flags %}
+                        <div class="p-3 rounded-xl bg-red-50/60 border border-red-200/50">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full sev-high">FLAGGED</span>
+                                <span class="text-[10px] font-mono text-outline ml-auto">FY{{ f.year }}</span>
+                            </div>
+                            <p class="text-xs text-on-surface-variant">
+                                RPT Value: <strong class="text-primary">₹{{ f.rpt_total_cr|round(0)|int }} Cr</strong>
+                                {% if f.yoy_growth_pct is not none %}
+                                &mdash; <span class="text-danger font-bold">{{ f.yoy_growth_pct }}% YoY</span>
+                                {% endif %}
+                            </p>
+                            {% if f.flag_reason %}
+                            <p class="text-[11px] text-red-700 mt-1">{{ f.flag_reason }}</p>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                {% else %}
+                    <!-- Fallback if no RPT data -->
+                    <div class="flex flex-col items-center justify-center py-10 text-center">
+                        <span class="material-symbols-outlined text-outline text-4xl mb-2">query_stats</span>
+                        <p class="text-sm text-on-surface-variant font-medium">RPT data analysis in progress or unavailable.</p>
+                        <p class="text-[10px] text-outline mt-1 max-w-xs">This feature requires a valid Gemini API key to extract transaction values from historical filings.</p>
+                    </div>
+                {% endif %}
+            </div>
+
+            <!-- Top Related Parties Table (only if data exists) -->
+            {% if rpt_data and rpt_data.top_parties %}
+            <div class="col-span-12 bento p-6 fade-up fade-up-6">
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="material-symbols-outlined text-secondary mi">hub</span>
+                    <h3 class="font-headline text-base font-bold text-primary">Top Related Parties</h3>
+                    <span class="ml-auto text-[10px] text-outline">Latest year transactions</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="border-b-2 border-outline-variant/20">
+                                <th class="text-left py-2 px-3 text-on-surface-variant font-bold text-[10px] uppercase tracking-wider">Related Party</th>
+                                <th class="text-left py-2 px-3 text-on-surface-variant font-bold text-[10px] uppercase tracking-wider">Relationship</th>
+                                <th class="text-right py-2 px-3 text-on-surface-variant font-bold text-[10px] uppercase tracking-wider">Amount (₹ Cr)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for party in rpt_data.top_parties %}
+                            <tr class="border-b border-outline-variant/10 hover:bg-surface-container-low/50 transition-colors">
+                                <td class="py-2.5 px-3 text-primary font-medium text-xs flex items-center gap-2">
+                                    <span class="w-2 h-2 rounded-full bg-secondary inline-block flex-shrink-0"></span>
+                                    {{ party.name }}
+                                </td>
+                                <td class="py-2.5 px-3 text-on-surface-variant text-xs">
+                                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold
+                                        {{ 'bg-blue-100 text-blue-800' if party.relationship == 'Subsidiary' else ('bg-purple-100 text-purple-800' if party.relationship == 'Promoter Group' else ('bg-amber-100 text-amber-800' if party.relationship == 'Key Management' else 'bg-gray-100 text-gray-800')) }}">
+                                        {{ party.relationship }}
+                                    </span>
+                                </td>
+                                <td class="py-2.5 px-3 text-right text-primary font-mono text-xs font-bold">₹{{ party.latest_amount_cr|round(0)|int }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endif %}
+
         </div>
     </div>
 
@@ -1008,6 +1312,56 @@ function initRiskCharts() {
         });
     }
 
+    // CHART 6b: RPT Growth Bar Chart (Gemini)
+    const cRPT = document.getElementById('chartRPT');
+    if (cRPT && chartData.rptGeminiYears && chartData.rptGeminiYears.length > 0) {
+        destroyChart('rpt');
+        const rptVals = chartData.rptGeminiValues;
+        const rptFlags = chartData.rptGeminiFlags;
+        const rptGrowth = chartData.rptGeminiGrowth;
+
+        chartInstances['rpt'] = new Chart(cRPT, {
+            type: 'bar',
+            data: {
+                labels: chartData.rptGeminiYears.map(y => 'FY' + y),
+                datasets: [{
+                    label: 'RPT Value (₹ Cr)',
+                    data: rptVals,
+                    backgroundColor: rptFlags.map(f => f ? 'rgba(220,38,38,0.7)' : 'rgba(4,83,205,0.6)'),
+                    borderColor: rptFlags.map(f => f ? '#dc2626' : '#0453cd'),
+                    borderWidth: 1.5,
+                    borderRadius: 6,
+                }]
+            },
+            options: {
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                const idx = ctx.dataIndex;
+                                let lbl = '₹' + (ctx.parsed.y !== null ? ctx.parsed.y.toLocaleString() : 'N/A') + ' Cr';
+                                const growth = rptGrowth[idx];
+                                if (growth !== null && growth !== undefined) {
+                                    lbl += ' (' + (growth > 0 ? '+' : '') + growth + '% YoY)';
+                                }
+                                if (rptFlags[idx]) lbl += ' 🚩 FLAGGED';
+                                return lbl;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        grid: { color: 'rgba(196,198,205,0.15)' },
+                        ticks: { callback: v => '₹' + v.toLocaleString() }
+                    },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
     // CHART 7: Anomaly Deviation Map (multi-line)
     const c7 = document.getElementById('chartAnomaly');
     if (c7 && chartData.anomalyYears && chartData.anomalyYears.length > 0) {
@@ -1213,10 +1567,188 @@ function initPeerCharts() {
     });
 }
 
-// Initialize charts for the default visible tab
+// ──────────────────────────────
+// Red Flags Timeline Line Chart
+// ──────────────────────────────
+function initRedFlagChart() {
+    const c = document.getElementById('chartRedFlagTimeline');
+    if (!c || !chartData.redFlagYears || chartData.redFlagYears.length === 0) return;
+    destroyChart('redFlagTimeline');
+    chartInstances['redFlagTimeline'] = new Chart(c, {
+        type: 'line',
+        data: {
+            labels: chartData.redFlagYears,
+            datasets: [
+                {
+                    label: 'High Severity',
+                    data: chartData.redFlagHigh,
+                    borderColor: '#dc2626',
+                    backgroundColor: 'rgba(220,38,38,0.08)',
+                    fill: true,
+                    borderWidth: 2.5,
+                    pointBackgroundColor: '#dc2626',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    pointRadius: 5,
+                    pointHoverRadius: 7,
+                },
+                {
+                    label: 'Medium Severity',
+                    data: chartData.redFlagMedium,
+                    borderColor: '#d97706',
+                    backgroundColor: 'rgba(217,119,6,0.08)',
+                    fill: true,
+                    borderWidth: 2.5,
+                    pointBackgroundColor: '#d97706',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    pointRadius: 5,
+                    pointHoverRadius: 7,
+                },
+                {
+                    label: 'Low Severity',
+                    data: chartData.redFlagLow,
+                    borderColor: '#16a34a',
+                    backgroundColor: 'rgba(22,163,74,0.08)',
+                    fill: true,
+                    borderWidth: 2.5,
+                    pointBackgroundColor: '#16a34a',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    pointRadius: 5,
+                    pointHoverRadius: 7,
+                }
+            ]
+        },
+        options: {
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ctx.dataset.label + ': ' + ctx.parsed.y + ' flag' + (ctx.parsed.y !== 1 ? 's' : '')
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(196,198,205,0.15)' },
+                    ticks: { stepSize: 1, precision: 0 },
+                    title: { display: true, text: 'Flag Count', font: { size: 10 } }
+                },
+                x: { grid: { display: false } }
+            }
+        }
+    });
+}
+
+// ──────────────────────────────
+// AI Report Section Parser
+// ──────────────────────────────
+function parseAndRenderReport() {
+    const rawEl = document.getElementById('ai-report-raw');
+    const container = document.getElementById('ai-report-sections');
+    if (!rawEl || !container) return;
+
+    const rawHTML = rawEl.innerHTML.trim();
+    // Get text content for parsing
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = rawHTML;
+    const rawText = tempDiv.textContent || tempDiv.innerText || '';
+
+    // Section config: detect by keywords in heading
+    const sectionConfig = [
+        { keywords: ['executive summary', 'summary', 'verdict', 'overview'], icon: 'description', cls: 'rs-summary', color: '#0453cd', span: 'lg:col-span-2' },
+        { keywords: ['key findings', 'findings', 'key observations'], icon: 'find_in_page', cls: 'rs-findings', color: '#7c3aed', span: '' },
+        { keywords: ['risk areas', 'risk', 'concerns', 'red flags'], icon: 'warning', cls: 'rs-risk', color: '#dc2626', span: '' },
+        { keywords: ['positive indicators', 'positive', 'strengths', 'healthy'], icon: 'verified', cls: 'rs-positive', color: '#16a34a', span: '' },
+        { keywords: ['recommendation', 'next steps', 'action'], icon: 'lightbulb', cls: 'rs-recommend', color: '#d97706', span: 'lg:col-span-2' },
+    ];
+
+    // Split by markdown ## headings or <h2>/<h3> tags or numbered sections like "1."
+    // Try splitting by ## first
+    const sections = [];
+    const headingPattern = /(?:^|\n)(?:#{1,3}\s+\d*\.?\s*|<h[23][^>]*>|\d+\.\s+\*{0,2})/i;
+    const parts = rawText.split(/\n(?=#{1,3}\s|\d+\.\s+\*{0,2})/);
+
+    if (parts.length <= 1) {
+        // Fallback: try splitting by numbered sections
+        const numberedParts = rawText.split(/\n(?=\d+\.\s)/);
+        if (numberedParts.length > 1) {
+            numberedParts.forEach(p => {
+                if (p.trim()) sections.push(p.trim());
+            });
+        } else {
+            // Render as a single section
+            sections.push(rawText);
+        }
+    } else {
+        parts.forEach(p => {
+            if (p.trim()) sections.push(p.trim());
+        });
+    }
+
+    // Match each section to a config
+    let html = '';
+    sections.forEach((section, idx) => {
+        // Extract the heading (first line) and body
+        const lines = section.split('\n');
+        let heading = lines[0].replace(/^#{1,3}\s*/, '').replace(/^\d+\.\s*/, '').replace(/\*{1,2}/g, '').trim();
+        const body = lines.slice(1).join('\n').trim();
+
+        // Find matching config
+        const headingLower = heading.toLowerCase();
+        let cfg = sectionConfig.find(c => c.keywords.some(k => headingLower.includes(k)));
+        if (!cfg) {
+            // Fallback config based on index
+            const fallbacks = [sectionConfig[0], sectionConfig[1], sectionConfig[2], sectionConfig[3], sectionConfig[4]];
+            cfg = fallbacks[idx % fallbacks.length];
+        }
+
+        // Parse body into bullet points or paragraphs
+        let bodyHtml = '';
+        const bulletLines = body.split('\n').filter(l => l.trim());
+        const hasBullets = bulletLines.some(l => /^\s*[-*•]\s/.test(l));
+
+        if (hasBullets) {
+            bodyHtml = '<ul>';
+            bulletLines.forEach(l => {
+                const cleaned = l.replace(/^\s*[-*•]\s*/, '').replace(/\*{1,2}([^*]+)\*{1,2}/g, '<strong>$1</strong>').trim();
+                if (cleaned) bodyHtml += '<li>' + cleaned + '</li>';
+            });
+            bodyHtml += '</ul>';
+        } else {
+            // Render as paragraphs
+            bulletLines.forEach(l => {
+                const cleaned = l.replace(/\*{1,2}([^*]+)\*{1,2}/g, '<strong>$1</strong>').trim();
+                if (cleaned) bodyHtml += '<p style="font-size:0.82rem;line-height:1.6;color:#44474c;margin-bottom:0.5rem;">' + cleaned + '</p>';
+            });
+        }
+
+        html += `
+            <div class="report-section ${cfg.cls} ${cfg.span} fade-up" style="animation-delay: ${idx * 0.08}s">
+                <h3 style="color: ${cfg.color}">
+                    <span class="material-symbols-outlined mi" style="font-size: 18px">${cfg.icon}</span>
+                    ${heading}
+                </h3>
+                ${bodyHtml}
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+// ── Wrap initRiskCharts to also init red flag chart ──
+const _origInitRiskCharts = initRiskCharts;
+initRiskCharts = function() {
+    _origInitRiskCharts();
+    initRedFlagChart();
+};
+
+// Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
-    // Overview tab is default, no charts there
-    // Pre-init financial charts in case user clicks that tab
+    // Parse and render AI report sections
+    parseAndRenderReport();
 });
 </script>
 </body>

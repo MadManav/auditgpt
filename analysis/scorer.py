@@ -9,37 +9,149 @@ import numpy as np
 
 
 # ──────────────────────────────────────────────
-# Fraud Risk Scoring
+# Fraud Risk Scoring (Industry-Aware)
 # ──────────────────────────────────────────────
 
 # Weights for severity levels
 SEVERITY_WEIGHTS = {
-    "high": 5,
-    "medium": 3,
+    "high": 3,
+    "medium": 2,
     "low": 1,
 }
 
 # Maximum possible score normalization factor
-MAX_REASONABLE_RAW_SCORE = 150  # ~30 high-severity signals
+# With high=3, ~30 signals ≈ 90 raw; use 100 for a smooth curve.
+MAX_REASONABLE_RAW_SCORE = 100
+
+# ── Industry-aware signal discounting ──────────────────────────────
+# Maps signal names → set of sectors where that signal is EXPECTED/NORMAL.
+# When a signal is expected for a sector, its severity weight is halved
+# (e.g., "high" treated as "medium") so the score isn't unfairly inflated.
+INDUSTRY_EXPECTED_SIGNALS = {
+    # ── Leverage & Debt ──
+    # Structurally high-debt sectors: leverage is a feature, not a bug.
+    "Debt Growing Faster Than Revenue": {"Banking", "Financial Services", "Infra",
+                                          "Realty", "Telecom", "Energy", "Auto"},
+    "Leverage Spike": {"Banking", "Financial Services", "Infra", "Realty",
+                       "Telecom", "Energy"},
+    "Weak Interest Coverage": {"Banking", "Financial Services", "Telecom", "Infra"},
+
+    # ── Asset intensity ──
+    # Low turnover is normal for asset-heavy industries.
+    "Asset Turnover Decline": {"Banking", "Financial Services", "Infra", "Realty",
+                                "Energy", "Metals", "Telecom", "Auto"},
+
+    # ── Cash-flow divergence ──
+    # Banks, infra, and capex-heavy sectors have structurally volatile OCF.
+    "Revenue-Cash Flow Divergence": {"Banking", "Financial Services", "Infra",
+                                      "Energy", "Auto"},
+    "Declining Operating Cash Flow": {"Banking", "Financial Services", "Realty",
+                                       "Infra", "Energy", "Auto"},
+    "Profit Exceeding Cash Flow":     {"Banking", "Financial Services", "Infra",
+                                       "Realty", "Auto"},
+    "Poor Cash Conversion": {"Banking", "Financial Services", "Realty", "Infra"},
+    "Declining Revenue Quality": {"Banking", "Financial Services"},
+
+    # ── Margins ──
+    # Cyclical sectors see margin swings that aren't fraud.
+    "Gross Margin Compression": {"Energy", "Metals", "Auto", "Pharma"},
+
+    # ── Receivables / Inventory ──
+    # Dealer-credit and seasonal inventory models inflate these metrics.
+    "Receivables Outpacing Revenue": {"Auto", "Infra", "Realty"},
+    "Inventory Buildup": {"Jewelry", "Retail", "Auto", "Metals"},
+
+    # ── Capex & other income ──
+    "Capex Cuts During Growth": {"IT", "FMCG"},      # Asset-light → lower capex expected
+    "Unusual Other Income Spike": {"FMCG", "IT"},    # Dividend/investment income is structural
+
+    # ── Working capital ──
+    "Working Capital Deterioration": {"Retail", "FMCG", "Hospitality", "Auto"},
+
+    # ── Tax ──
+    "Tax Rate Anomaly": {"Pharma", "IT"},  # Tax holidays & SEZ benefits are normal
+}
+
+# Discount factor: severity weight is multiplied by this when signal is
+# expected for the industry. 0.3 → a "high" signal (weight 3) becomes
+# effectively 0.9 instead of 3.  (70% discount)
+INDUSTRY_DISCOUNT = 0.3
+
+
+def _resolve_sector(financials: dict) -> str:
+    """Resolve the normalised sector label from financials metadata."""
+    raw_sector = financials.get("sector", "Unknown")
+    raw_industry = financials.get("industry", "Unknown")
+
+    # Same mapping used in benchmark_against_peers (kept in sync)
+    INDUSTRY_MAP = {
+        "Luxury Goods": "Jewelry", "Gold": "Jewelry", "Jewelry": "Jewelry",
+        "Specialty Retail": "Retail", "Department Stores": "Retail",
+        "Apparel Retail": "Retail", "Internet Retail": "Retail",
+        "Home Improvement Retail": "Retail",
+        "Auto Manufacturers": "Auto", "Auto Parts": "Auto",
+        "Auto - Manufacturers": "Auto", "Auto - Parts": "Auto",
+        "Residential Construction": "Realty",
+        "Lodging": "Hospitality", "Restaurants": "Hospitality",
+        "Travel Services": "Hospitality",
+        "Drug Manufacturers": "Pharma", "Drug Manufacturers - General": "Pharma",
+        "Drug Manufacturers - Specialty & Generic": "Pharma", "Biotechnology": "Pharma",
+        "Banks - Regional": "Banking", "Banks - Diversified": "Banking",
+        "Insurance": "Financial Services", "Credit Services": "Financial Services",
+        "Capital Markets": "Financial Services",
+        "Software - Application": "IT", "Software - Infrastructure": "IT",
+        "Information Technology Services": "IT", "Semiconductors": "IT",
+        "Cement": "Infra", "Building Materials": "Infra",
+        "Steel": "Metals", "Aluminum": "Metals", "Copper": "Metals",
+        "Oil & Gas E&P": "Energy", "Oil & Gas Integrated": "Energy",
+        "Oil & Gas Refining & Marketing": "Energy",
+        "Packaged Foods": "FMCG", "Household & Personal Products": "FMCG",
+        "Beverages - Non-Alcoholic": "FMCG", "Tobacco": "FMCG",
+        "Telecom Services": "Telecom",
+    }
+    SECTOR_MAP = {
+        "Technology": "IT", "Information Technology": "IT",
+        "Healthcare": "Pharma", "Consumer Cyclical": "Auto",
+        "Consumer Defensive": "FMCG", "Energy": "Energy",
+        "Communication Services": "Telecom", "Basic Materials": "Metals",
+        "Industrials": "Infra", "Real Estate": "Realty", "Utilities": "Energy",
+    }
+    return INDUSTRY_MAP.get(raw_industry, SECTOR_MAP.get(raw_sector, raw_sector))
 
 
 def score_company(financials: dict, signals: list, beneish: dict) -> dict:
     """
     Compute weighted fraud risk score (0-100) from all detected signals + Beneish.
 
+    Now INDUSTRY-AWARE: signals that are expected/normal for the company's
+    sector receive a weight discount so the score isn't inflated unfairly
+    (e.g., banks won't be penalized for high leverage).
+
     Scoring breakdown:
-    - 60% from fraud signals (weighted by severity)
+    - 60% from fraud signals (weighted by severity, **industry-adjusted**)
     - 25% from Beneish M-Score
     - 15% from trend consistency
 
     Returns:
         dict with: overall_score, risk_level, signal_score, beneish_score, breakdown
     """
-    # --- Signal-based score (0-60) ---
-    raw_signal_score = sum(SEVERITY_WEIGHTS.get(s["severity"], 1) for s in signals)
+    sector = _resolve_sector(financials)
+
+    # --- Signal-based score (0-60) — now with industry discount ---
+    raw_signal_score = 0
+    discounted_count = 0
+    for s in signals:
+        weight = SEVERITY_WEIGHTS.get(s["severity"], 1)
+        signal_name = s.get("name", "")
+        expected_sectors = INDUSTRY_EXPECTED_SIGNALS.get(signal_name, set())
+        if sector in expected_sectors:
+            weight *= INDUSTRY_DISCOUNT  # Discount for industry-normal signals
+            discounted_count += 1
+        raw_signal_score += weight
+
     signal_score = min(60, (raw_signal_score / MAX_REASONABLE_RAW_SCORE) * 60)
 
-    # --- Beneish-based score (0-25) ---
+    # --- Beneish-based score (0-25) — with sector adjustment ---
     beneish_score = 0
     if beneish and beneish.get("m_score") is not None:
         m = beneish["m_score"]
@@ -52,12 +164,18 @@ def score_company(financials: dict, signals: list, beneish: dict) -> dict:
         else:
             beneish_score = 2   # Low risk
 
+        # Sector adjustment: FMCG conglomerates (like ITC) have large
+        # investment portfolios that inflate TATA (Total Accruals), pushing
+        # M-Score into "manipulator" range without actual manipulation.
+        # Cap at grey zone (15) for these sectors.
+        BENEISH_CAPPED_SECTORS = {"FMCG", "Financial Services", "Banking"}
+        if sector in BENEISH_CAPPED_SECTORS and beneish_score > 15:
+            beneish_score = 15
+
     # --- Trend score (0-15) ---
     # Check: are signals getting worse over time?
     trend_score = 0
     if signals:
-        recent_years = set()
-        older_years = set()
         years = financials.get("years", [])
         if len(years) >= 4:
             mid = len(years) // 2
@@ -69,14 +187,18 @@ def score_company(financials: dict, signals: list, beneish: dict) -> dict:
 
             if older_count > 0:
                 trend_ratio = recent_count / older_count
-                if trend_ratio > 2.0:
-                    trend_score = 15  # Significant worsening
-                elif trend_ratio > 1.5:
+                if trend_ratio > 2.5:
+                    trend_score = 15  # Severe worsening
+                elif trend_ratio > 2.0:
                     trend_score = 10
+                elif trend_ratio > 1.5:
+                    trend_score = 7
                 elif trend_ratio > 1.0:
-                    trend_score = 5
-            elif recent_count > 5:
+                    trend_score = 3
+            elif recent_count > 8:
                 trend_score = 12  # Many recent signals, no old ones
+            elif recent_count > 5:
+                trend_score = 7
 
     overall_score = round(signal_score + beneish_score + trend_score, 1)
     overall_score = min(100, overall_score)
@@ -99,6 +221,7 @@ def score_company(financials: dict, signals: list, beneish: dict) -> dict:
         "overall_score": overall_score,
         "risk_level": risk_level,
         "risk_color": risk_color,
+        "sector_used": sector,
         "breakdown": {
             "signal_score": round(signal_score, 1),
             "signal_max": 60,
@@ -106,6 +229,7 @@ def score_company(financials: dict, signals: list, beneish: dict) -> dict:
             "beneish_max": 25,
             "trend_score": trend_score,
             "trend_max": 15,
+            "industry_discounted_signals": discounted_count,
         },
         "total_signals_triggered": len(signals),
         "high_severity_count": sum(1 for s in signals if s["severity"] == "high"),

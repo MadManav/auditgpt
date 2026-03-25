@@ -71,19 +71,26 @@ FRAUD SIGNALS DETECTED ({signal_summary['total']} total - {signal_summary['high_
 KEY RATIOS:
 {peer_metrics}
 
-Generate a forensic audit report with these sections:
-1. **Executive Summary** (2-3 lines — overall verdict)
-2. **Key Findings** (bullet points — what stands out, both positive and negative)
-3. **Risk Areas** (specific concerns with data backing)
-4. **Positive Indicators** (what looks healthy)
-5. **Recommendation** (1-2 lines — what an investor/auditor should do next)
+Generate a forensic audit report with these sections (use ## markdown headings exactly as shown):
+## Executive Summary
+(2-3 lines — overall verdict)
+## Key Findings
+(bullet points — what stands out, both positive and negative)
+## Risk Areas
+(specific concerns with data backing)
+## Positive Indicators
+(what looks healthy)
+## Recommendation
+(1-2 lines — what an investor/auditor should do next)
 
 Rules:
+- Use ## headings exactly as shown above — do NOT use numbered sections
 - Be specific — cite actual numbers from the data
 - Use plain English, no jargon
 - Be balanced — mention both risks AND positives
 - Keep it under 300 words
-- Format in markdown
+- Format in markdown with bullet points using - dashes
+- Do NOT mention the AI model or system used to generate this report
 """
     return prompt
 

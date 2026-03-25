@@ -148,7 +148,15 @@ def _run_pipeline(ticker):
     # Step 6 — Peer benchmarking
     peer_comparison = benchmark_against_peers(ticker, financials)
 
-    # Step 7 — LLM forensic report (Gemini)
+    # Step 7 — Promoter / Insider Behaviour
+    promoter_data = None
+    try:
+        from analysis.promoter_tracker import analyze_promoter_behaviour
+        promoter_data = analyze_promoter_behaviour(ticker)
+    except Exception as e:
+        print(f"[app] Promoter tracker failed: {e}")
+
+    # Step 8 — LLM forensic report (Gemini)
     try:
         from ui.llm import generate_forensic_report
         ai_report = generate_forensic_report(
@@ -157,6 +165,16 @@ def _run_pipeline(ticker):
         )
     except Exception:
         ai_report = None
+
+    # Step 9 — Related Party Transaction analysis (Gemini)
+    rpt_data = None
+    try:
+        from analysis.rpt_analysis import analyze_rpt
+        company_name_rpt = company_info.get("name", ticker) if company_info else ticker
+        rpt_years = [int(str(y)[:4]) for y in financials.get("years", [])]
+        rpt_data = analyze_rpt(ticker, company_name_rpt, rpt_years)
+    except Exception as e:
+        print(f"[app] RPT analysis failed: {e}")
 
     # Pre-serialize chart data to avoid Jinja2 Undefined→tojson crashes
     years = financials.get("years", []) if financials else []
@@ -184,6 +202,17 @@ def _run_pipeline(ticker):
             rpt_years.append(y.get("year"))
             rpt_scores.append(1 if y.get("related_party_flag") else 0)
 
+    # Compute red flag counts per year by severity
+    _rf_counts = {}  # { year: {high: N, medium: N, low: N} }
+    if signals:
+        for sig in signals:
+            yr = sig.get("year")
+            sev = sig.get("severity", "low")
+            if yr not in _rf_counts:
+                _rf_counts[yr] = {"high": 0, "medium": 0, "low": 0}
+            _rf_counts[yr][sev] = _rf_counts[yr].get(sev, 0) + 1
+    _rf_sorted_years = sorted(_rf_counts.keys()) if _rf_counts else []
+
     chart_data = {
         "years": years,
         "revenue": revenue,
@@ -195,15 +224,25 @@ def _run_pipeline(ticker):
         "sentScores": [],
         "peerMetrics": peer_comparison.get("company_metrics", {}) if peer_comparison else {},
         "peerAvgs": peer_comparison.get("peer_averages", {}) if peer_comparison else {},
-        # RPT chart
+        # RPT chart (old auditor-based)
         "rptYears": rpt_years,
         "rptScores": rpt_scores,
+        # RPT Gemini analysis chart
+        "rptGeminiYears": [],
+        "rptGeminiValues": [],
+        "rptGeminiGrowth": [],
+        "rptGeminiFlags": [],
         # Anomaly deviation map
         "anomalyYears": years[1:] if len(years) > 1 else [],
         "anomalyRevenue": _yoy(revenue)[1:] if len(revenue) > 1 else [],
         "anomalyDebt": _yoy(total_debt)[1:] if len(total_debt) > 1 else [],
         "anomalyReceivables": _yoy(receivables)[1:] if len(receivables) > 1 else [],
         "anomalyNetIncome": _yoy(net_income)[1:] if len(net_income) > 1 else [],
+        # Red flag timeline chart
+        "redFlagYears": _rf_sorted_years,
+        "redFlagHigh": [_rf_counts[y]["high"] for y in _rf_sorted_years],
+        "redFlagMedium": [_rf_counts[y]["medium"] for y in _rf_sorted_years],
+        "redFlagLow": [_rf_counts[y]["low"] for y in _rf_sorted_years],
     }
     if auditor_sentiment and auditor_sentiment.get("years"):
         chart_data["sentYears"] = [y.get("year") for y in auditor_sentiment["years"]]
@@ -221,6 +260,13 @@ def _run_pipeline(ticker):
         chart_data["mismatchMgmt"] = []
         chart_data["mismatchGaps"] = []
 
+    # RPT Gemini chart data
+    if rpt_data and rpt_data.get("years"):
+        chart_data["rptGeminiYears"] = [y.get("year") for y in rpt_data["years"]]
+        chart_data["rptGeminiValues"] = [y.get("rpt_total_cr", 0) for y in rpt_data["years"]]
+        chart_data["rptGeminiGrowth"] = [y.get("yoy_growth_pct") for y in rpt_data["years"]]
+        chart_data["rptGeminiFlags"] = [y.get("flag", False) for y in rpt_data["years"]]
+
     return {
         "ticker": ticker,
         "company_info": company_info,
@@ -235,6 +281,8 @@ def _run_pipeline(ticker):
         "score": score,
         "peer_comparison": peer_comparison,
         "ai_report": ai_report,
+        "promoter_data": promoter_data,
+        "rpt_data": rpt_data,
         "chart_data_json": json.dumps(chart_data),
     }
 
