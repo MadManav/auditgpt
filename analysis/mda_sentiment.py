@@ -1,19 +1,16 @@
 """
 mda_sentiment.py — Management Discussion & Analysis Tone Analyser (Gemini-powered)
-
-Asks Gemini to rate management's MD&A tone for each year, then compares
-it with the auditor sentiment to detect mismatches (optimistic mgmt +
-cautious auditor = red flag).
 """
 
 import os
 import json
 import re
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
 def _clean_json(raw: str) -> str:
@@ -29,14 +26,7 @@ def _clean_json(raw: str) -> str:
     return raw.strip()
 
 
-def analyze_mda_sentiment(ticker: str, company_name: str, years: list) -> dict:
-    """
-    Ask Gemini to assess management tone from MD&A sections.
-
-    Returns dict with:
-        - years: [{year, tone, optimism_score, key_claims, red_flags}]
-        - summary: overall management trajectory
-    """
+def _call_gemini(ticker: str, company_name: str, years: list) -> dict:
     years_str = ", ".join([f"FY{y}" for y in years])
 
     prompt = f"""You are a forensic accounting expert specializing in analyzing Management Discussion and Analysis (MD&A) sections of Indian listed companies.
@@ -73,41 +63,54 @@ Rules:
 - Flag years where management was overly optimistic despite known problems
 """
 
-    try:
-        model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.1,
-                max_output_tokens=4096,
-                response_mime_type="application/json",
-            )
-        )
+    MAX_RETRIES = 3
+    data = None
 
-        MAX_RETRIES = 2
-        data = None
-        for attempt in range(MAX_RETRIES):
-            try:
-                from google.api_core.retry import Retry
-                response = model.generate_content(
-                    prompt, 
-                    request_options={"retry": None, "timeout": 10}
-                )
-                cleaned = _clean_json(response.text)
-                data = json.loads(cleaned)
-                break
-            except json.JSONDecodeError as je:
-                print(f"[mda_sentiment] JSON parse error (attempt {attempt + 1}): {je}")
-                if attempt >= MAX_RETRIES - 1:
-                    raise
-            except Exception as api_err:
-                msg = str(api_err).lower()
-                if any(k in msg for k in ("quota", "resource_exhausted", "resourceexhausted", "429", "rate limit", "per day")):
-                    print(f"[mda_sentiment] Quota exceeded — skipping Gemini call.")
-                    raise
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.1,
+                    max_output_tokens=4096,
+                    response_mime_type="application/json",
+                ),
+            )
+            cleaned = _clean_json(response.text)
+            data = json.loads(cleaned)
+            break
+
+        except json.JSONDecodeError as je:
+            print(f"[mda_sentiment] JSON parse error (attempt {attempt + 1}/{MAX_RETRIES}): {je}")
+            if attempt >= MAX_RETRIES - 1:
                 raise
 
-        if data is None:
-            raise ValueError("Failed to parse Gemini response after retries")
+        except Exception as api_err:
+            msg = str(api_err).lower()
+            if any(k in msg for k in ("quota", "resource_exhausted", "resourceexhausted", "429", "rate limit", "per day")):
+                print("[mda_sentiment] Quota exceeded — skipping Gemini call.")
+                raise
+            if attempt >= MAX_RETRIES - 1:
+                raise
+            print(f"[mda_sentiment] Attempt {attempt + 1} failed: {api_err}. Retrying...")
+
+    if data is None:
+        raise ValueError("Failed to parse Gemini response after retries")
+
+    return data
+
+
+def analyze_mda_sentiment(ticker: str, company_name: str, years: list) -> dict:
+    """
+    Ask Gemini to assess management tone from MD&A sections.
+
+    Returns dict with:
+        - years: [{year, tone, optimism_score, key_claims, red_flags}]
+        - summary: overall management trajectory
+    """
+    try:
+        data = _call_gemini(ticker, company_name, years)
 
         year_data = data.get("years", [])
         summary = data.get("summary", "")
@@ -139,23 +142,16 @@ def compute_mismatch(auditor_data: dict, mda_data: dict) -> dict:
     """
     Compare auditor sentiment vs management tone year-by-year.
     A mismatch = management optimistic but auditor cautious (or vice versa).
-
-    Returns:
-        - years: [{year, auditor_score, mgmt_score, gap, mismatch_level}]
-        - mismatch_count: number of years with significant mismatch
-        - avg_gap: average gap across years
     """
-    auditor_by_year = {}
-    if auditor_data and auditor_data.get("years"):
-        for y in auditor_data["years"]:
-            auditor_by_year[y.get("year")] = y.get("sentiment_score", 50)
+    auditor_by_year = {
+        y.get("year"): y.get("sentiment_score", 50)
+        for y in (auditor_data or {}).get("years", [])
+    }
+    mda_by_year = {
+        y.get("year"): y.get("optimism_score", 50)
+        for y in (mda_data or {}).get("years", [])
+    }
 
-    mda_by_year = {}
-    if mda_data and mda_data.get("years"):
-        for y in mda_data["years"]:
-            mda_by_year[y.get("year")] = y.get("optimism_score", 50)
-
-    # Build comparison for years present in both
     all_years = sorted(set(auditor_by_year.keys()) & set(mda_by_year.keys()))
 
     result_years = []
@@ -168,15 +164,13 @@ def compute_mismatch(auditor_data: dict, mda_data: dict) -> dict:
         gap = m_score - a_score  # Positive = mgmt more optimistic than auditor
 
         if gap >= 30:
-            level = "CRITICAL"
-            mismatches += 1
+            level, mismatches = "CRITICAL", mismatches + 1
         elif gap >= 15:
-            level = "HIGH"
-            mismatches += 1
+            level, mismatches = "HIGH", mismatches + 1
         elif gap >= 5:
             level = "MODERATE"
         elif gap <= -15:
-            level = "INVERSE"  # Auditor more positive than management (unusual)
+            level = "INVERSE"
         else:
             level = "ALIGNED"
 
@@ -189,11 +183,9 @@ def compute_mismatch(auditor_data: dict, mda_data: dict) -> dict:
             "mismatch_level": level,
         })
 
-    avg_gap = round(sum(gaps) / len(gaps), 1) if gaps else 0
-
     return {
         "years": result_years,
         "mismatch_count": mismatches,
-        "avg_gap": avg_gap,
+        "avg_gap": round(sum(gaps) / len(gaps), 1) if gaps else 0,
         "total_years": len(result_years),
     }

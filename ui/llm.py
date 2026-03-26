@@ -5,13 +5,13 @@ Uses Google Gemini to generate structured JSON forensic audit reports.
 
 import os
 import json
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Configure Gemini
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
 def _build_prompt(ticker, company_info, financials, beneish, signals, signal_summary, score, peer_comparison):
@@ -20,7 +20,6 @@ def _build_prompt(ticker, company_info, financials, beneish, signals, signal_sum
     company_name = company_info.get("name", ticker) if company_info else ticker
     sector = company_info.get("sector", "Unknown") if company_info else "Unknown"
 
-    # Format financial data
     years = financials.get("years", [])
     revenue = financials.get("revenue", [])
     net_income = financials.get("net_income", [])
@@ -35,19 +34,16 @@ def _build_prompt(ticker, company_info, financials, beneish, signals, signal_sum
         d = f"{debt[i]/1e7:,.0f}" if i < len(debt) and debt[i] else "N/A"
         fin_table += f"{yr} | Rs.{r} | Rs.{n} | Rs.{o} | Rs.{d}\n"
 
-    # Format signals
     top_signals = ""
     for s in signals[:10]:
         top_signals += f"- [{s['severity'].upper()}] {s['year']} - {s['name']}: {s['explanation']}\n"
 
-    # Beneish info
     m_score_info = f"M-Score: {beneish.get('m_score', 'N/A')}"
     if beneish.get('is_likely_manipulator'):
         m_score_info += " (LIKELY MANIPULATOR)"
     else:
         m_score_info += " (Unlikely manipulator)"
 
-    # Peer metrics
     peer_metrics = ""
     if peer_comparison and peer_comparison.get("company_metrics"):
         for k, v in peer_comparison["company_metrics"].items():
@@ -82,22 +78,21 @@ OUTPUT FORMAT: Return ONLY a valid JSON object with this exact structure:
 }}
 
 TEMPLATE FOR summary_paragraph:
-"The company exhibits a [Low / Moderate / High] fraud risk with an overall score of {score['overall_score']}/100. [2-3 sentences about key findings: what the M-Score says, major red flags or positive signals detected, and how financials trend over the years]. [1 sentence on the overall recommendation — whether the company appears clean or warrants further scrutiny]."
+"The company exhibits a [Low / Moderate / High] fraud risk with an overall score of {score['overall_score']}/100. [2-3 sentences about key findings: what the M-Score says, major red flags or positive signals detected, and how financials trend over the years]. [1 sentence on the overall recommendation - whether the company appears clean or warrants further scrutiny]."
 
 Rules:
-- Be specific — cite actual numbers from the data
+- Be specific - cite actual numbers from the data
 - Use plain English, no jargon
-- Be balanced — mention both risks AND positives
+- Be balanced - mention both risks AND positives
 - The summary_paragraph should be exactly 1 paragraph, 4-6 sentences
 - Include 5-8 pointwise findings covering: executive summary, key concerns, positive indicators, and recommendation
 - Do NOT mention the AI model or system used to generate this report
-- Do NOT use any Unicode special characters like emojis, Rupee signs, or fancy dashes — use plain ASCII only
+- Do NOT use any Unicode special characters like emojis, Rupee signs, or fancy dashes - use plain ASCII only
 """
     return prompt
 
 
 def _is_quota_error(e: Exception) -> bool:
-    """Return True if this exception is a Gemini quota/rate-limit error."""
     msg = str(e).lower()
     return any(k in msg for k in ("quota", "resource_exhausted", "resourceexhausted", "429", "rate limit", "per day"))
 
@@ -105,7 +100,7 @@ def _is_quota_error(e: Exception) -> bool:
 def generate_forensic_report(ticker, company_info, financials, beneish, signals, signal_summary, score, peer_comparison):
     """
     Generate a structured JSON forensic audit report using Gemini.
-    Returns fallback immediately on quota errors — no retrying.
+    Returns fallback immediately on quota errors.
     """
     risk_level = score.get("risk_level", "Unknown") if score else "Unknown"
     overall = score.get("overall_score", "N/A") if score else "N/A"
@@ -124,7 +119,7 @@ def generate_forensic_report(ticker, company_info, financials, beneish, signals,
                 {
                     "title": "AI Report Unavailable",
                     "description": f"Could not generate detailed AI analysis: {reason or 'API error'}",
-                    "evidence": "Fallback data used — re-run analysis to retry"
+                    "evidence": "Fallback data used - re-run analysis to retry"
                 }
             ]
         }
@@ -135,21 +130,19 @@ def generate_forensic_report(ticker, company_info, financials, beneish, signals,
             signals, signal_summary, score, peer_comparison
         )
 
-        model = genai.GenerativeModel("gemini-2.5-flash")
-
-        # Attempt generation — catch quota errors immediately, don't wait/retry
         try:
-            from google.api_core.retry import Retry
-            response = model.generate_content(
-                prompt,
-                generation_config={"response_mime_type": "application/json"},
-                request_options={"retry": None, "timeout": 10}
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                ),
             )
         except Exception as api_err:
             if _is_quota_error(api_err):
-                print(f"[llm] Quota exceeded — skipping AI report, continuing pipeline.")
+                print("[llm] Quota exceeded — skipping AI report, continuing pipeline.")
                 return _fallback("Gemini free-tier daily quota exceeded (20 req/day)")
-            raise  # re-raise non-quota errors to outer handler
+            raise
 
         result = json.loads(response.text)
 
@@ -163,4 +156,3 @@ def generate_forensic_report(ticker, company_info, financials, beneish, signals,
     except Exception as e:
         print(f"[llm] Error generating report: {e}")
         return _fallback(str(e))
-

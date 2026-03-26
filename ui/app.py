@@ -4,6 +4,7 @@ Handles web routes and orchestrates the full analysis pipeline.
 """
 
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, make_response, session
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import traceback
 import json
@@ -63,7 +64,6 @@ def _resolve_ticker(user_input: str) -> str:
     best_match = None
     best_score = 0
     for name_lower, symbol in _NAME_MAP.items():
-        # Check if all query words appear in the company name
         query_words = query.split()
         matches = sum(1 for w in query_words if w in name_lower)
         score = matches / len(query_words) if query_words else 0
@@ -108,16 +108,70 @@ def _run_pipeline(ticker):
     signals = detect_fraud_signals(financials)
     signal_summary = get_signal_summary(signals)
 
-    # Step 4 — Auditor sentiment analysis (Gemini memory-based)
-    try:
-        from analysis.auditor_sentiment import analyze_auditor_sentiment
-        company_name = company_info.get("name", ticker) if company_info else ticker
-        audit_years = [int(str(y)[:4]) for y in financials.get("years", [])]
-        auditor_sentiment = analyze_auditor_sentiment(ticker, company_name, audit_years)
+    # Step 5 — Risk scoring (needed before Step 8, so run before parallel block)
+    score = score_company(financials, signals, beneish)
+
+    # Step 6 — Peer benchmarking
+    peer_comparison = benchmark_against_peers(ticker, financials)
+
+    # ── Shared inputs for Gemini calls ──────────────────────────
+    company_name = company_info.get("name", ticker) if company_info else ticker
+    # Cap at 8 most recent years to reduce token count and speed up Gemini
+    audit_years = [int(str(y)[:4]) for y in financials.get("years", [])][-8:]
+
+    # ── Steps 4, 4b, 7, 8 — run in parallel ────────────────────
+    from analysis.auditor_sentiment import analyze_auditor_sentiment
+    from analysis.mda_sentiment import analyze_mda_sentiment, compute_mismatch
+    from analysis.promoter_tracker import analyze_promoter_behaviour
+    from ui.llm import generate_forensic_report
+
+    def _get_auditor():
+        return analyze_auditor_sentiment(ticker, company_name, audit_years)
+
+    def _get_mda():
+        return analyze_mda_sentiment(ticker, company_name, audit_years)
+
+    def _get_promoter():
+        return analyze_promoter_behaviour(ticker)
+
+    def _get_report():
+        return generate_forensic_report(
+            ticker, company_info, financials, beneish,
+            signals, signal_summary, score, peer_comparison
+        )
+
+    auditor_sentiment = None
+    mda_sentiment     = None
+    promoter_data     = None
+    ai_report_json    = None
+
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        futures = {
+            ex.submit(_get_auditor):  "auditor",
+            ex.submit(_get_mda):      "mda",
+            ex.submit(_get_promoter): "promoter",
+            ex.submit(_get_report):   "report",
+        }
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                result = future.result()
+                if key == "auditor":
+                    auditor_sentiment = result
+                elif key == "mda":
+                    mda_sentiment = result
+                elif key == "promoter":
+                    promoter_data = result
+                elif key == "report":
+                    ai_report_json = result
+            except Exception as e:
+                print(f"[app] Parallel task '{key}' failed: {e}")
+
+    # ── Post-process auditor result ──────────────────────────────
+    if auditor_sentiment is not None:
         auditor_sentiment["has_pdfs"] = False
-        # If returned empty years (API error), create placeholders
         if not auditor_sentiment.get("years"):
-            print(f"[app] Auditor analysis returned empty — creating placeholders")
+            print("[app] Auditor analysis returned empty — creating placeholders")
             auditor_sentiment["years"] = [
                 {
                     "year": yr, "source": "UNAVAILABLE", "sentiment_score": 50,
@@ -132,49 +186,14 @@ def _run_pipeline(ticker):
         else:
             for y in auditor_sentiment["years"]:
                 y["source"] = y.get("source", "AI_MEMORY")
-    except Exception as e:
-        print(f"[app] Auditor sentiment failed: {e}")
-        auditor_sentiment = None
 
-    # Step 4b — MD&A (Management) tone analysis
-    mda_sentiment = None
+    # ── Tone mismatch (needs both auditor + mda results) ─────────
     tone_mismatch = None
-    try:
-        from analysis.mda_sentiment import analyze_mda_sentiment, compute_mismatch
-        company_name = company_info.get("name", ticker) if company_info else ticker
-        audit_years = [int(str(y)[:4]) for y in financials.get("years", [])]
-        mda_sentiment = analyze_mda_sentiment(ticker, company_name, audit_years)
-        if mda_sentiment and auditor_sentiment:
+    if mda_sentiment and auditor_sentiment:
+        try:
             tone_mismatch = compute_mismatch(auditor_sentiment, mda_sentiment)
-    except Exception as e:
-        print(f"[app] MD&A sentiment failed: {e}")
-
-    # Step 5 — Risk scoring
-    score = score_company(financials, signals, beneish)
-
-    # Step 6 — Peer benchmarking
-    peer_comparison = benchmark_against_peers(ticker, financials)
-
-    # Step 7 — Promoter / Insider Behaviour
-    promoter_data = None
-    try:
-        from analysis.promoter_tracker import analyze_promoter_behaviour
-        promoter_data = analyze_promoter_behaviour(ticker)
-    except Exception as e:
-        print(f"[app] Promoter tracker failed: {e}")
-
-    # Step 8 — LLM forensic report (Gemini) — returns structured JSON
-    ai_report_json = None
-    try:
-        from ui.llm import generate_forensic_report
-        ai_report_json = generate_forensic_report(
-            ticker, company_info, financials, beneish,
-            signals, signal_summary, score, peer_comparison
-        )
-    except Exception as e:
-        print(f"[app] LLM report failed: {e}")
-        ai_report_json = None
-
+        except Exception as e:
+            print(f"[app] Tone mismatch failed: {e}")
 
     # Pre-serialize chart data to avoid Jinja2 Undefined→tojson crashes
     years = financials.get("years", []) if financials else []
@@ -193,7 +212,6 @@ def _run_pipeline(ticker):
             else:
                 result.append(None)
         return result
-
 
     # Compute red flag counts per year by severity
     _rf_counts = {}  # { year: {high: N, medium: N, low: N} }
@@ -245,7 +263,6 @@ def _run_pipeline(ticker):
         chart_data["mismatchMgmt"] = []
         chart_data["mismatchGaps"] = []
 
-
     show_beneish = score.get("sector_used") not in {"Banking", "Financial Services", "Insurance"}
 
     results = {
@@ -276,9 +293,6 @@ def index():
     return render_template('index.html')
 
 
-
-
-
 @bp.route('/analyze', methods=['POST'])
 def analyze():
     """
@@ -291,6 +305,15 @@ def analyze():
     ticker = _resolve_ticker(raw_input)
     if '.' not in ticker:
         ticker = ticker + '.NS'
+
+    # Quick validity check (takes 1-2 sec) before moving to loading screen
+    try:
+        import yfinance as yf
+        stock = yf.Ticker(ticker)
+        if stock.history(period="1d").empty:
+            return render_template('index.html', error=f"Could not find valid data for '{ticker}'. It may be delisted, suspended, or invalid.")
+    except Exception as e:
+        return render_template('index.html', error=f"Error validating ticker '{ticker}'. It may be invalid.")
 
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {'status': 'running', 'result': None, 'error': None}
