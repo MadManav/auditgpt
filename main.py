@@ -22,7 +22,8 @@ def create_app():
 
     return app
 
+# Expose the application globally for WSGI servers like Gunicorn
+app = create_app()
 
 if __name__ == '__main__':
-    app = create_app()
     app.run(debug=True, port=5000)
